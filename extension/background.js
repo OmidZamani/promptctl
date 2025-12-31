@@ -26,18 +26,22 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       // Try to save directly
       try {
         await savePromptDirect(selectedText, tab.url);
+        // Show success notification
+        chrome.notifications.create({
+          type: 'basic',
+          iconUrl: 'icons/48x48.png',
+          title: 'PromptCtl',
+          message: 'Prompt saved successfully!'
+        });
       } catch (error) {
-        // If direct save fails, open popup with text pre-filled
-        chrome.action.openPopup();
-        
-        // Wait a bit for popup to load, then send message
-        setTimeout(() => {
-          chrome.runtime.sendMessage({
-            action: 'fillText',
-            text: selectedText,
-            url: tab.url
-          });
-        }, 100);
+        console.error('Save failed:', error);
+        // Show error notification
+        chrome.notifications.create({
+          type: 'basic',
+          iconUrl: 'icons/48x48.png',
+          title: 'PromptCtl Error',
+          message: 'Could not save prompt. Is daemon running?'
+        });
       }
     }
   }
@@ -46,28 +50,53 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 // Handle keyboard shortcuts
 chrome.commands.onCommand.addListener(async (command) => {
   if (command === 'save-prompt') {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    
-    chrome.tabs.sendMessage(tab.id, { action: 'getSelection' }, async (response) => {
-      if (response && response.text) {
-        try {
-          await savePromptDirect(response.text, tab.url);
-          // Show notification
-          chrome.notifications.create({
-            type: 'basic',
-            iconUrl: 'icons/48x48.png',
-            title: 'PromptCtl',
-            message: 'Prompt saved successfully!'
-          });
-        } catch (error) {
-          // Open popup if direct save fails
+    try {
+      // Query for active tab
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tabs || tabs.length === 0) {
+        console.error('No active tab found');
+        return;
+      }
+      
+      const tab = tabs[0];
+      
+      // Send message to content script to get selection
+      chrome.tabs.sendMessage(tab.id, { action: 'getSelection' }, async (response) => {
+        // Check for errors
+        if (chrome.runtime.lastError) {
+          console.log('Content script not ready:', chrome.runtime.lastError.message);
+          // Just open popup instead
+          chrome.action.openPopup();
+          return;
+        }
+        
+        if (response && response.text) {
+          try {
+            await savePromptDirect(response.text, tab.url);
+            // Show notification
+            chrome.notifications.create({
+              type: 'basic',
+              iconUrl: 'icons/48x48.png',
+              title: 'PromptCtl',
+              message: 'Prompt saved successfully!'
+            });
+          } catch (error) {
+            console.error('Save failed:', error);
+            chrome.notifications.create({
+              type: 'basic',
+              iconUrl: 'icons/48x48.png',
+              title: 'PromptCtl Error',
+              message: 'Could not save. Is daemon running?'
+            });
+          }
+        } else {
+          // No selection, just open popup
           chrome.action.openPopup();
         }
-      } else {
-        // No selection, just open popup
-        chrome.action.openPopup();
-      }
-    });
+      });
+    } catch (error) {
+      console.error('Keyboard shortcut error:', error);
+    }
   }
 });
 
