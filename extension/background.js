@@ -17,6 +17,24 @@ chrome.runtime.onInstalled.addListener(() => {
   console.log('PromptCtl extension installed');
 });
 
+// Helper to show notifications safely
+function showNotification(title, message) {
+  try {
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('icons/48x48.png'),
+      title: title,
+      message: message
+    }, (notificationId) => {
+      if (chrome.runtime.lastError) {
+        console.log('Notification error:', chrome.runtime.lastError.message);
+      }
+    });
+  } catch (e) {
+    console.log('Notification failed:', e);
+  }
+}
+
 // Handle context menu clicks
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === 'save-to-promptctl') {
@@ -26,22 +44,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       // Try to save directly
       try {
         await savePromptDirect(selectedText, tab.url);
-        // Show success notification
-        chrome.notifications.create({
-          type: 'basic',
-          iconUrl: 'icons/48x48.png',
-          title: 'PromptCtl',
-          message: 'Prompt saved successfully!'
-        });
+        showNotification('PromptCtl', 'Prompt saved successfully!');
       } catch (error) {
         console.error('Save failed:', error);
-        // Show error notification
-        chrome.notifications.create({
-          type: 'basic',
-          iconUrl: 'icons/48x48.png',
-          title: 'PromptCtl Error',
-          message: 'Could not save prompt. Is daemon running?'
-        });
+        showNotification('PromptCtl Error', 'Could not save prompt. Is daemon running?');
       }
     }
   }
@@ -73,21 +79,10 @@ chrome.commands.onCommand.addListener(async (command) => {
         if (response && response.text) {
           try {
             await savePromptDirect(response.text, tab.url);
-            // Show notification
-            chrome.notifications.create({
-              type: 'basic',
-              iconUrl: 'icons/48x48.png',
-              title: 'PromptCtl',
-              message: 'Prompt saved successfully!'
-            });
+            showNotification('PromptCtl', 'Prompt saved successfully!');
           } catch (error) {
             console.error('Save failed:', error);
-            chrome.notifications.create({
-              type: 'basic',
-              iconUrl: 'icons/48x48.png',
-              title: 'PromptCtl Error',
-              message: 'Could not save. Is daemon running?'
-            });
+            showNotification('PromptCtl Error', 'Could not save. Is daemon running?');
           }
         } else {
           // No selection, just open popup

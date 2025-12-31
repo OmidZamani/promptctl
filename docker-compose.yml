@@ -1,0 +1,78 @@
+# promptctl + Ollama Docker Compose
+#
+# Usage:
+#   docker-compose up -d        # Start everything (auto mode)
+#   docker-compose logs -f      # View logs
+#   docker-compose down         # Stop everything
+#
+# The browser extension connects to http://localhost:9090
+# Ollama API available at http://localhost:11434
+
+services:
+  # Main service: Ollama + promptctl daemon auto-start
+  promptctl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: promptctl:latest
+    container_name: promptctl
+    
+    # Volumes for persistent storage
+    volumes:
+      - promptctl-data:/home/promptctl/.promptctl
+      - ollama-models:/root/.ollama
+    
+    # Environment variables
+    environment:
+      - PROMPTCTL_REPO=/home/promptctl/.promptctl
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_MODELS=/root/.ollama/models
+    
+    # Expose ports
+    # 9090: promptctl socket API (browser extension)
+    # 11434: Ollama API (for direct LLM access)
+    ports:
+      - "9090:9090"
+      - "11434:11434"
+    
+    # Auto-start mode (starts Ollama + daemon via supervisor)
+    command: auto
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # CLI service for running commands (optional, on-demand)
+  promptctl-cli:
+    image: promptctl:latest
+    container_name: promptctl-cli
+    
+    volumes:
+      - promptctl-data:/home/promptctl/.promptctl
+    
+    environment:
+      - PROMPTCTL_REPO=/home/promptctl/.promptctl
+    
+    # Interactive mode for CLI
+    stdin_open: true
+    tty: true
+    
+    # Don't auto-start, use: docker-compose run promptctl-cli <command>
+    profiles:
+      - cli
+    
+    # Default to help
+    command: --help
+
+volumes:
+  promptctl-data:
+    driver: local
+  ollama-models:
+    driver: local

@@ -58,12 +58,15 @@ import logging
 import json
 import threading
 from pathlib import Path
-from typing import Optional, Literal
+from typing import Optional, Literal, Dict, Any, List
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 
 from .git_manager import GitManager
 from .prompt_store import PromptStore
+from .pipeline import DSPyPipeline, PipelineConfig, get_pipeline
+from .job_queue import get_queue, start_queue
 
 # Optional: requests for LLM integration
 try:
@@ -184,16 +187,52 @@ Message:"""
 
 
 class SocketHandler(BaseHTTPRequestHandler):
-    """HTTP request handler for browser extension socket server."""
+    """
+    HTTP request handler for browser extension socket server.
     
-    def __init__(self, *args, prompt_store=None, git_mgr=None, **kwargs):
+    Endpoints:
+    - GET /health - Health check
+    - GET /prompts - List prompts
+    - GET /prompts/<id> - Get specific prompt
+    - GET /jobs - List background jobs
+    - GET /jobs/<id> - Get job status
+    - POST /save - Save prompt (with optional auto-optimize)
+    - POST /optimize - Start optimization job
+    - POST /evaluate - Start evaluation job
+    - POST /chain - Create prompt chain
+    - POST /agent - Start agent run
+    """
+    
+    def __init__(self, *args, prompt_store=None, git_mgr=None, pipeline=None, **kwargs):
         self.prompt_store = prompt_store
         self.git_mgr = git_mgr
+        self.pipeline = pipeline
         super().__init__(*args, **kwargs)
     
     def log_message(self, format, *args):
         """Override to use our logger."""
         logger.debug(f"Socket: {format % args}")
+    
+    def _send_json(self, data: Dict[str, Any], status: int = 200) -> None:
+        """Send JSON response."""
+        self.send_response(status)
+        self._send_cors_headers()
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
+    
+    def _read_json(self) -> Dict[str, Any]:
+        """Read JSON from request body."""
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        return json.loads(body.decode()) if body else {}
+    
+    def _parse_path(self) -> tuple:
+        """Parse path and query params."""
+        parsed = urlparse(self.path)
+        path_parts = parsed.path.strip('/').split('/')
+        query = parse_qs(parsed.query)
+        return path_parts, query
     
     def do_OPTIONS(self):
         """Handle CORS preflight."""
@@ -202,65 +241,278 @@ class SocketHandler(BaseHTTPRequestHandler):
         self.end_headers()
     
     def do_GET(self):
-        """Handle GET requests (health check)."""
-        if self.path == '/health':
-            self.send_response(200)
-            self._send_cors_headers()
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            response = json.dumps({"status": "ok", "service": "promptctl"})
-            self.wfile.write(response.encode())
-        else:
-            self.send_error(404)
+        """Handle GET requests."""
+        path_parts, query = self._parse_path()
+        
+        try:
+            if path_parts[0] == 'health':
+                self._handle_health()
+            
+            elif path_parts[0] == 'prompts':
+                if len(path_parts) > 1:
+                    self._handle_get_prompt(path_parts[1])
+                else:
+                    self._handle_list_prompts(query)
+            
+            elif path_parts[0] == 'jobs':
+                if len(path_parts) > 1:
+                    self._handle_get_job(path_parts[1])
+                else:
+                    self._handle_list_jobs(query)
+            
+            elif path_parts[0] == 'tags':
+                self._handle_list_tags()
+            
+            else:
+                self.send_error(404, f"Not found: {self.path}")
+        
+        except Exception as e:
+            logger.error(f"GET error: {e}")
+            self._send_json({"error": str(e)}, 500)
     
     def do_POST(self):
-        """Handle POST requests (save prompt)."""
-        if self.path == '/save':
-            try:
-                # Read body
-                content_length = int(self.headers.get('Content-Length', 0))
-                body = self.rfile.read(content_length)
-                data = json.loads(body.decode())
-                
-                # Extract data
-                content = data.get('content', '')
-                name = data.get('name')
-                tags = data.get('tags', [])
-                
-                if not content:
-                    self.send_error(400, "Content required")
-                    return
-                
-                # Save prompt
-                prompt_id = self.prompt_store.save_prompt(
-                    content=content,
-                    name=name,
-                    tags=tags,
-                    metadata={"source": "browser-extension"}
-                )
-                
-                # Commit
-                self.git_mgr.commit(f"Browser save: {name or prompt_id}")
-                
-                # Send response
-                self.send_response(200)
-                self._send_cors_headers()
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                
-                response = json.dumps({
-                    "status": "success",
-                    "prompt_id": prompt_id
-                })
-                self.wfile.write(response.encode())
-                
-                logger.info(f"Saved prompt from browser: {prompt_id}")
+        """Handle POST requests."""
+        path_parts, _ = self._parse_path()
+        
+        try:
+            data = self._read_json()
             
-            except Exception as e:
-                logger.error(f"Socket save error: {e}")
-                self.send_error(500, str(e))
+            if path_parts[0] == 'save':
+                self._handle_save(data)
+            
+            elif path_parts[0] == 'optimize':
+                self._handle_optimize(data)
+            
+            elif path_parts[0] == 'evaluate':
+                self._handle_evaluate(data)
+            
+            elif path_parts[0] == 'chain':
+                self._handle_chain(data)
+            
+            elif path_parts[0] == 'agent':
+                self._handle_agent(data)
+            
+            else:
+                self.send_error(404, f"Not found: {self.path}")
+        
+        except json.JSONDecodeError as e:
+            self._send_json({"error": f"Invalid JSON: {e}"}, 400)
+        except Exception as e:
+            logger.error(f"POST error: {e}")
+            self._send_json({"error": str(e)}, 500)
+    
+    # GET handlers
+    def _handle_health(self):
+        """Health check endpoint."""
+        queue = get_queue()
+        jobs = queue.get_all_jobs(5)
+        pending = sum(1 for j in jobs if j['status'] == 'pending')
+        running = sum(1 for j in jobs if j['status'] == 'running')
+        
+        self._send_json({
+            "status": "ok",
+            "service": "promptctl",
+            "pipeline": self.pipeline is not None,
+            "jobs_pending": pending,
+            "jobs_running": running
+        })
+    
+    def _handle_list_prompts(self, query: Dict):
+        """List prompts endpoint."""
+        tags = query.get('tags', [])
+        limit = int(query.get('limit', [100])[0])
+        
+        if self.pipeline:
+            prompts = self.pipeline.list_prompts(tags=tags if tags else None, limit=limit)
         else:
-            self.send_error(404)
+            prompts = self.prompt_store.list_prompts()[:limit]
+        
+        self._send_json({"prompts": prompts, "count": len(prompts)})
+    
+    def _handle_get_prompt(self, prompt_id: str):
+        """Get specific prompt endpoint."""
+        try:
+            prompt = self.prompt_store.get_prompt(prompt_id)
+            self._send_json(prompt)
+        except ValueError as e:
+            self._send_json({"error": str(e)}, 404)
+    
+    def _handle_list_jobs(self, query: Dict):
+        """List jobs endpoint."""
+        limit = int(query.get('limit', [50])[0])
+        
+        if self.pipeline:
+            jobs = self.pipeline.list_jobs(limit)
+        else:
+            jobs = get_queue().get_all_jobs(limit)
+        
+        self._send_json({"jobs": jobs, "count": len(jobs)})
+    
+    def _handle_get_job(self, job_id: str):
+        """Get job status endpoint."""
+        if self.pipeline:
+            status = self.pipeline.get_job_status(job_id)
+        else:
+            status = get_queue().get_status(job_id)
+        
+        if status:
+            self._send_json(status)
+        else:
+            self._send_json({"error": f"Job not found: {job_id}"}, 404)
+    
+    def _handle_list_tags(self):
+        """List all tags endpoint."""
+        from .tag_manager import TagManager
+        tag_mgr = TagManager(str(self.prompt_store.repo_path))
+        tags = tag_mgr.get_all_tags_with_counts()
+        self._send_json({"tags": tags})
+    
+    # POST handlers
+    def _handle_save(self, data: Dict):
+        """Save prompt endpoint."""
+        content = data.get('content', '')
+        name = data.get('name')
+        tags = data.get('tags', [])
+        auto_optimize = data.get('auto_optimize', False)
+        
+        if not content:
+            self._send_json({"error": "Content required"}, 400)
+            return
+        
+        if self.pipeline:
+            # Use pipeline for full processing
+            result = self.pipeline.process_prompt(
+                content=content,
+                name=name,
+                tags=tags,
+                auto_optimize=auto_optimize,
+                source="browser"
+            )
+            
+            self._send_json({
+                "status": "success",
+                "prompt_id": result.prompt_id,
+                "stages": result.stages_completed,
+                "job_id": result.job_id
+            })
+        else:
+            # Fallback to direct save
+            prompt_id = self.prompt_store.save_prompt(
+                content=content,
+                name=name,
+                tags=tags,
+                metadata={"source": "browser-extension"}
+            )
+            self.git_mgr.commit(f"Browser save: {name or prompt_id}")
+            
+            self._send_json({
+                "status": "success",
+                "prompt_id": prompt_id
+            })
+        
+        logger.info(f"Saved prompt from browser: {name or 'unnamed'}")
+    
+    def _handle_optimize(self, data: Dict):
+        """Optimize prompt endpoint."""
+        prompt_id = data.get('prompt_id')
+        rounds = data.get('rounds', 3)
+        test_cases = data.get('test_cases')
+        async_mode = data.get('async', True)
+        
+        if not prompt_id:
+            self._send_json({"error": "prompt_id required"}, 400)
+            return
+        
+        if not self.pipeline:
+            self._send_json({"error": "Pipeline not available"}, 503)
+            return
+        
+        result = self.pipeline.optimize_prompt(
+            prompt_id=prompt_id,
+            rounds=rounds,
+            test_cases=test_cases,
+            async_mode=async_mode
+        )
+        
+        self._send_json(result)
+        logger.info(f"Optimization requested for: {prompt_id}")
+    
+    def _handle_evaluate(self, data: Dict):
+        """Evaluate prompt endpoint."""
+        prompt_id = data.get('prompt_id')
+        test_cases = data.get('test_cases', [])
+        async_mode = data.get('async', True)
+        
+        if not prompt_id:
+            self._send_json({"error": "prompt_id required"}, 400)
+            return
+        
+        if not test_cases:
+            self._send_json({"error": "test_cases required"}, 400)
+            return
+        
+        if not self.pipeline:
+            self._send_json({"error": "Pipeline not available"}, 503)
+            return
+        
+        result = self.pipeline.evaluate_prompt(
+            prompt_id=prompt_id,
+            test_cases=test_cases,
+            async_mode=async_mode
+        )
+        
+        self._send_json(result)
+        logger.info(f"Evaluation requested for: {prompt_id}")
+    
+    def _handle_chain(self, data: Dict):
+        """Chain prompts endpoint."""
+        prompt_ids = data.get('prompt_ids', [])
+        chain_name = data.get('name')
+        async_mode = data.get('async', True)
+        
+        if len(prompt_ids) < 2:
+            self._send_json({"error": "At least 2 prompt_ids required"}, 400)
+            return
+        
+        if not self.pipeline:
+            self._send_json({"error": "Pipeline not available"}, 503)
+            return
+        
+        result = self.pipeline.chain_prompts(
+            prompt_ids=prompt_ids,
+            chain_name=chain_name,
+            async_mode=async_mode
+        )
+        
+        self._send_json(result)
+        logger.info(f"Chain requested for: {prompt_ids}")
+    
+    def _handle_agent(self, data: Dict):
+        """Agent run endpoint."""
+        prompt_id = data.get('prompt_id')
+        rounds = data.get('rounds', 5)
+        min_score = data.get('min_score', 90.0)
+        test_cases = data.get('test_cases')
+        async_mode = data.get('async', True)
+        
+        if not prompt_id:
+            self._send_json({"error": "prompt_id required"}, 400)
+            return
+        
+        if not self.pipeline:
+            self._send_json({"error": "Pipeline not available"}, 503)
+            return
+        
+        result = self.pipeline.run_agent(
+            prompt_id=prompt_id,
+            rounds=rounds,
+            min_score=min_score,
+            test_cases=test_cases,
+            async_mode=async_mode
+        )
+        
+        self._send_json(result)
+        logger.info(f"Agent run requested for: {prompt_id}")
     
     def _send_cors_headers(self):
         """Send CORS headers for browser access."""
@@ -280,7 +532,9 @@ class PromptDaemon:
         use_llm: bool = False,
         llm_model: str = "phi3.5",
         enable_socket: bool = False,
-        socket_port: int = 9090
+        socket_port: int = 9090,
+        auto_optimize: bool = False,
+        optimization_rounds: int = 3
     ):
         """
         Initialize daemon.
@@ -320,6 +574,11 @@ class PromptDaemon:
         self.socket_server = None
         self.socket_thread = None
         
+        # Pipeline configuration
+        self.auto_optimize = auto_optimize
+        self.optimization_rounds = optimization_rounds
+        self.pipeline = None
+        
         if enable_socket:
             self._start_socket_server()
     
@@ -328,16 +587,35 @@ class PromptDaemon:
         try:
             prompt_store = PromptStore(str(self.repo_path))
             
+            # Initialize pipeline if auto-optimize is enabled
+            if self.auto_optimize:
+                config = PipelineConfig(
+                    auto_optimize=True,
+                    optimization_rounds=self.optimization_rounds,
+                    use_local_ollama=True,
+                    auto_commit=True
+                )
+                self.pipeline = DSPyPipeline(str(self.repo_path), config)
+                logger.info(f"Pipeline initialized with auto-optimize (rounds: {self.optimization_rounds})")
+            else:
+                # Create pipeline without auto-optimize for API access
+                self.pipeline = get_pipeline(str(self.repo_path))
+            
+            # Start job queue
+            start_queue()
+            
             # Create handler with dependencies
             def handler_factory(*args, **kwargs):
                 return SocketHandler(
                     *args,
                     prompt_store=prompt_store,
                     git_mgr=self.git_mgr,
+                    pipeline=self.pipeline,
                     **kwargs
                 )
             
-            self.socket_server = HTTPServer(('localhost', self.socket_port), handler_factory)
+            # Bind to 0.0.0.0 to allow connections from outside container
+            self.socket_server = HTTPServer(('0.0.0.0', self.socket_port), handler_factory)
             
             # Run server in separate thread
             self.socket_thread = threading.Thread(

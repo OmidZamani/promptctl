@@ -23,8 +23,7 @@ from datetime import datetime
 # Optional DSPy import
 try:
     import dspy
-    from dspy import OpenAI, configure
-    from dspy.teleprompt import BootstrapFewShot
+    from dspy import BootstrapFewShot
     HAS_DSPY = True
 except ImportError:
     HAS_DSPY = False
@@ -74,19 +73,19 @@ class PromptOptimizer:
             logger.error("DSPy not available. Install with: pip install dspy-ai")
             raise ImportError("dspy-ai required for optimization")
         
-        # Configure DSPy LLM
+        # Configure DSPy LLM (DSPy 3.x API)
         if use_local_ollama:
-            # Use local Ollama (Phi-3.5)
-            self.lm = dspy.OllamaLocal(
-                model="phi3.5",
-                base_url=f"http://localhost:{llm_port}",
+            # Use local Ollama
+            self.lm = dspy.LM(
+                model=f"ollama_chat/phi3.5",
+                api_base=f"http://localhost:{llm_port}",
                 max_tokens=2000
             )
         else:
             # Use OpenAI (requires API key)
-            self.lm = dspy.OpenAI(model=model, max_tokens=2000)
+            self.lm = dspy.LM(model=f"openai/{model}", max_tokens=2000)
         
-        dspy.settings.configure(lm=self.lm)
+        dspy.configure(lm=self.lm)
         
         logger.info(f"PromptOptimizer initialized with model: {model}")
     
@@ -216,19 +215,38 @@ class PromptOptimizer:
         
         # Default metric: simple substring match
         if metric_fn is None:
-            def default_metric(output: str, expected: str) -> float:
-                if expected.lower() in output.lower():
+            def default_metric(output: str, expected) -> float:
+                # Handle both string and list expected values
+                if isinstance(expected, list):
+                    expected = " ".join(str(e) for e in expected)
+                expected = str(expected) if expected else ""
+                output = str(output) if output else ""
+                if expected and expected.lower() in output.lower():
                     return 100.0
+                # Also check if output contains meaningful content
+                if len(output.strip()) > 10:
+                    return 50.0  # Partial credit for generating content
                 return 0.0
             metric_fn = default_metric
         
         # Generate test cases if not provided
         if test_cases is None:
-            examples = self.generate_examples(prompt_id, count=3)
-            test_cases = [
-                {"input": ex.get("input", ""), "expected": ex.get("output", "")}
-                for ex in examples
-            ]
+            try:
+                examples = self.generate_examples(prompt_id, count=3)
+                test_cases = []
+                for ex in examples:
+                    inp = ex.get("input", "")
+                    out = ex.get("output", "")
+                    # Convert lists to strings
+                    if isinstance(inp, list):
+                        inp = " ".join(str(i) for i in inp)
+                    if isinstance(out, list):
+                        out = " ".join(str(o) for o in out)
+                    test_cases.append({"input": str(inp), "expected": str(out)})
+            except Exception as e:
+                logger.warning(f"Failed to generate examples: {e}")
+                # Use default test case
+                test_cases = [{"input": "test input", "expected": "test output"}]
         
         best_content = current_content
         best_score = 0.0

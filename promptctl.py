@@ -13,6 +13,7 @@ Commands:
 """
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
 from typing import Optional
@@ -24,6 +25,12 @@ from core.daemon import PromptDaemon
 from core.batch_manager import BatchManager
 from core.dspy_optimizer import PromptOptimizer
 from core.agent import PromptAgent
+from core.pipeline import DSPyPipeline, PipelineConfig
+
+
+def check_git_available() -> bool:
+    """Check if git CLI is available in PATH."""
+    return shutil.which("git") is not None
 
 
 def cmd_save(args: argparse.Namespace) -> int:
@@ -206,13 +213,19 @@ def cmd_daemon(args: argparse.Namespace) -> int:
             use_llm=args.use_llm,
             llm_model=args.llm_model,
             enable_socket=args.socket,
-            socket_port=args.socket_port
+            socket_port=args.socket_port,
+            auto_optimize=args.auto_optimize,
+            optimization_rounds=args.optimization_rounds
         )
         
         print(f"Starting promptctl daemon (interval: {args.interval}s)")
         print(f"Conflict strategy: {args.conflict_strategy}")
         if args.use_llm:
             print(f"LLM commit generation: enabled ({args.llm_model})")
+        if args.socket:
+            print(f"Socket server: http://localhost:{args.socket_port}")
+        if args.auto_optimize:
+            print(f"Auto-optimize: enabled (rounds: {args.optimization_rounds})")
         print("Press Ctrl+C to stop\n")
         
         daemon.run()
@@ -426,6 +439,88 @@ def cmd_test(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_pipeline(args: argparse.Namespace) -> int:
+    """Run DSPy pipeline operations."""
+    try:
+        config = PipelineConfig(
+            auto_optimize=args.auto_optimize,
+            optimization_rounds=args.rounds,
+            use_local_ollama=args.use_ollama,
+            auto_commit=not args.no_commit
+        )
+        
+        pipeline = DSPyPipeline(args.repo, config)
+        
+        if args.action == "save":
+            # Read content
+            if args.file:
+                content = Path(args.file).read_text()
+            elif args.message:
+                content = args.message
+            else:
+                print("Reading from stdin (Ctrl+D to finish)...")
+                content = sys.stdin.read()
+            
+            result = pipeline.process_prompt(
+                content=content,
+                name=args.name,
+                tags=args.tags,
+                auto_optimize=args.auto_optimize,
+                source="cli"
+            )
+            
+            print(f"\n✓ Pipeline complete")
+            print(f"Prompt ID: {result.prompt_id}")
+            print(f"Stages: {', '.join(result.stages_completed)}")
+            if result.job_id:
+                print(f"Optimization job: {result.job_id}")
+        
+        elif args.action == "status":
+            if args.job_id:
+                status = pipeline.get_job_status(args.job_id)
+                if status:
+                    print(f"Job: {status['id']}")
+                    print(f"Type: {status['job_type']}")
+                    print(f"Status: {status['status']}")
+                    print(f"Progress: {status['progress']:.1f}%")
+                    if status.get('result'):
+                        print(f"Result: {status['result']}")
+                    if status.get('error'):
+                        print(f"Error: {status['error']}")
+                else:
+                    print(f"Job not found: {args.job_id}")
+            else:
+                jobs = pipeline.list_jobs(10)
+                print(f"Recent jobs ({len(jobs)}):")
+                for job in jobs:
+                    status_icon = {
+                        'completed': '✓',
+                        'running': '⟳',
+                        'pending': '○',
+                        'failed': '✗'
+                    }.get(job['status'], '?')
+                    print(f"  {status_icon} {job['id']:10} {job['job_type']:10} {job['status']}")
+        
+        elif args.action == "jobs":
+            jobs = pipeline.list_jobs(args.limit)
+            print(f"Jobs ({len(jobs)}):")
+            for job in jobs:
+                status_icon = {
+                    'completed': '✓',
+                    'running': '⟳',
+                    'pending': '○',
+                    'failed': '✗'
+                }.get(job['status'], '?')
+                progress = f"{job['progress']:.0f}%" if job['status'] == 'running' else ''
+                print(f"  {status_icon} {job['id']:10} {job['job_type']:12} {job['status']:10} {progress}")
+        
+        return 0
+        
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def main() -> int:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -503,6 +598,17 @@ def main() -> int:
         default=9090,
         help="Socket server port (default: 9090)"
     )
+    daemon_parser.add_argument(
+        "--auto-optimize",
+        action="store_true",
+        help="Auto-optimize prompts saved via socket (requires DSPy)"
+    )
+    daemon_parser.add_argument(
+        "--optimization-rounds",
+        type=int,
+        default=3,
+        help="Optimization rounds for auto-optimize (default: 3)"
+    )
     
     # Status command
     status_parser = subparsers.add_parser("status", help="Show status")
@@ -543,10 +649,38 @@ def main() -> int:
     test_parser.add_argument("prompt_id", help="Prompt ID to test")
     test_parser.add_argument("--test-file", help="JSON file with test cases")
     
+    # Pipeline command
+    pipeline_parser = subparsers.add_parser("pipeline", help="DSPy pipeline operations")
+    pipeline_parser.add_argument(
+        "action",
+        choices=["save", "status", "jobs"],
+        help="Pipeline action"
+    )
+    pipeline_parser.add_argument("--name", help="Prompt name (for save)")
+    pipeline_parser.add_argument("--tags", nargs="+", help="Tags (for save)")
+    pipeline_parser.add_argument("--file", "-f", help="Read content from file (for save)")
+    pipeline_parser.add_argument("--message", "-m", help="Content inline (for save)")
+    pipeline_parser.add_argument("--auto-optimize", action="store_true", help="Enable auto-optimization")
+    pipeline_parser.add_argument("--rounds", type=int, default=3, help="Optimization rounds")
+    pipeline_parser.add_argument("--use-ollama", action="store_true", default=True, help="Use local Ollama")
+    pipeline_parser.add_argument("--no-commit", action="store_true", help="Skip auto-commit")
+    pipeline_parser.add_argument("--job-id", help="Job ID (for status)")
+    pipeline_parser.add_argument("--limit", type=int, default=50, help="Limit for jobs list")
+    
     args = parser.parse_args()
     
     if not args.command:
         parser.print_help()
+        return 1
+    
+    # Check if git is available
+    if not check_git_available():
+        print("ERROR: git is not installed or not in PATH.", file=sys.stderr)
+        print("\nprompctl requires git to be installed.", file=sys.stderr)
+        print("\nInstallation instructions:", file=sys.stderr)
+        print("  macOS:   brew install git", file=sys.stderr)
+        print("  Ubuntu:  sudo apt-get install git", file=sys.stderr)
+        print("  Windows: https://git-scm.com/download/win", file=sys.stderr)
         return 1
     
     # Initialize repo if needed
@@ -570,6 +704,7 @@ def main() -> int:
         "evaluate": cmd_evaluate,
         "agent": cmd_agent,
         "test": cmd_test,
+        "pipeline": cmd_pipeline,
     }
     
     return handlers[args.command](args)

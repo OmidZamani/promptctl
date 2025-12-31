@@ -10,7 +10,7 @@
   <div class="container">
     <div class="header">
       <h1>📝 PromptCtl</h1>
-      <p class="subtitle">Quick Capture</p>
+      <p class="subtitle">Quick Capture + DSPy</p>
     </div>
     
     <div class="status" id="status">
@@ -18,51 +18,91 @@
       <span id="statusText">Checking connection...</span>
     </div>
     
-    <div class="form">
-      <div class="form-group">
-        <label for="promptText">Prompt Text</label>
-        <textarea 
-          id="promptText" 
-          placeholder="Enter prompt or select text on page..."
-          rows="6"
-        ></textarea>
+    <!-- Tab Navigation -->
+    <div class="tabs">
+      <button class="tab active" data-tab="capture">Capture</button>
+      <button class="tab" data-tab="prompts">Prompts</button>
+      <button class="tab" data-tab="jobs">Jobs</button>
+    </div>
+    
+    <!-- Capture Tab -->
+    <div class="tab-content active" id="tab-capture">
+      <div class="form">
+        <div class="form-group">
+          <label for="promptText">Prompt Text</label>
+          <textarea 
+            id="promptText" 
+            placeholder="Enter prompt or select text on page..."
+            rows="5"
+          ></textarea>
+        </div>
+        
+        <div class="form-group">
+          <label for="promptName">Name (optional)</label>
+          <input 
+            type="text" 
+            id="promptName" 
+            placeholder="my-prompt"
+          >
+        </div>
+        
+        <div class="form-group">
+          <label for="promptTags">Tags (comma-separated)</label>
+          <input 
+            type="text" 
+            id="promptTags" 
+            placeholder="web, research, ai"
+          >
+        </div>
+        
+        <div class="form-group checkbox-group">
+          <label>
+            <input type="checkbox" id="autoTag">
+            Auto-tag from domain
+          </label>
+          <label>
+            <input type="checkbox" id="autoOptimize">
+            Auto-optimize with DSPy
+          </label>
+        </div>
+        
+        <div class="button-row">
+          <button id="saveBtn" class="save-btn">
+            💾 Save
+          </button>
+          <button id="saveOptimizeBtn" class="optimize-btn">
+            🚀 Save & Optimize
+          </button>
+        </div>
+        
+        <div class="message" id="message"></div>
       </div>
-      
-      <div class="form-group">
-        <label for="promptName">Name (optional)</label>
-        <input 
-          type="text" 
-          id="promptName" 
-          placeholder="my-prompt"
-        >
+    </div>
+    
+    <!-- Prompts Tab -->
+    <div class="tab-content" id="tab-prompts">
+      <div class="list-header">
+        <input type="text" id="promptSearch" placeholder="Search prompts...">
+        <button id="refreshPrompts" class="icon-btn">🔄</button>
       </div>
-      
-      <div class="form-group">
-        <label for="promptTags">Tags (comma-separated)</label>
-        <input 
-          type="text" 
-          id="promptTags" 
-          placeholder="web, research, ai"
-        >
+      <div class="prompts-list" id="promptsList">
+        <p class="loading">Loading prompts...</p>
       </div>
-      
-      <div class="form-group">
-        <label>
-          <input type="checkbox" id="autoTag">
-          Auto-tag from domain
-        </label>
+    </div>
+    
+    <!-- Jobs Tab -->
+    <div class="tab-content" id="tab-jobs">
+      <div class="list-header">
+        <span class="list-title">Background Jobs</span>
+        <button id="refreshJobs" class="icon-btn">🔄</button>
       </div>
-      
-      <button id="saveBtn" class="save-btn">
-        💾 Save Prompt
-      </button>
-      
-      <div class="message" id="message"></div>
+      <div class="jobs-list" id="jobsList">
+        <p class="loading">Loading jobs...</p>
+      </div>
     </div>
     
     <div class="footer">
-      <p>Tip: Select text → Right-click → "Save to PromptCtl"</p>
-      <p>Shortcut: <kbd>Ctrl+Shift+S</kbd></p>
+      <p>Shortcut: <kbd>Ctrl+Shift+S</kbd> to save selection</p>
     </div>
   </div>
   

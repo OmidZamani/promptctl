@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed in runtime)
+*.md
+!README.md
+
+# Test files
+tests/
+examples/
+
+# Local development
+.promptctl/
+*.tmp
+.batch_counter
+.conflict_log.txt
+.tags_index.json
+
+# Docker (keep Dockerfile and compose for context)
+# Note: supervisord.conf and docker-entrypoint.sh are needed
