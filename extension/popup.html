@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PromptCtl Quick Capture</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>📝 PromptCtl</h1>
+      <p class="subtitle">Quick Capture</p>
+    </div>
+    
+    <div class="status" id="status">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Checking connection...</span>
+    </div>
+    
+    <div class="form">
+      <div class="form-group">
+        <label for="promptText">Prompt Text</label>
+        <textarea 
+          id="promptText" 
+          placeholder="Enter prompt or select text on page..."
+          rows="6"
+        ></textarea>
+      </div>
+      
+      <div class="form-group">
+        <label for="promptName">Name (optional)</label>
+        <input 
+          type="text" 
+          id="promptName" 
+          placeholder="my-prompt"
+        >
+      </div>
+      
+      <div class="form-group">
+        <label for="promptTags">Tags (comma-separated)</label>
+        <input 
+          type="text" 
+          id="promptTags" 
+          placeholder="web, research, ai"
+        >
+      </div>
+      
+      <div class="form-group">
+        <label>
+          <input type="checkbox" id="autoTag">
+          Auto-tag from domain
+        </label>
+      </div>
+      
+      <button id="saveBtn" class="save-btn">
+        💾 Save Prompt
+      </button>
+      
+      <div class="message" id="message"></div>
+    </div>
+    
+    <div class="footer">
+      <p>Tip: Select text → Right-click → "Save to PromptCtl"</p>
+      <p>Shortcut: <kbd>Ctrl+Shift+S</kbd></p>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -55,11 +55,15 @@ Best practices:
 
 import time
 import logging
+import json
+import threading
 from pathlib import Path
 from typing import Optional, Literal
 from datetime import datetime
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from .git_manager import GitManager
+from .prompt_store import PromptStore
 
 # Optional: requests for LLM integration
 try:
@@ -179,6 +183,92 @@ Message:"""
         return fallback_msg
 
 
+class SocketHandler(BaseHTTPRequestHandler):
+    """HTTP request handler for browser extension socket server."""
+    
+    def __init__(self, *args, prompt_store=None, git_mgr=None, **kwargs):
+        self.prompt_store = prompt_store
+        self.git_mgr = git_mgr
+        super().__init__(*args, **kwargs)
+    
+    def log_message(self, format, *args):
+        """Override to use our logger."""
+        logger.debug(f"Socket: {format % args}")
+    
+    def do_OPTIONS(self):
+        """Handle CORS preflight."""
+        self.send_response(200)
+        self._send_cors_headers()
+        self.end_headers()
+    
+    def do_GET(self):
+        """Handle GET requests (health check)."""
+        if self.path == '/health':
+            self.send_response(200)
+            self._send_cors_headers()
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            response = json.dumps({"status": "ok", "service": "promptctl"})
+            self.wfile.write(response.encode())
+        else:
+            self.send_error(404)
+    
+    def do_POST(self):
+        """Handle POST requests (save prompt)."""
+        if self.path == '/save':
+            try:
+                # Read body
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode())
+                
+                # Extract data
+                content = data.get('content', '')
+                name = data.get('name')
+                tags = data.get('tags', [])
+                
+                if not content:
+                    self.send_error(400, "Content required")
+                    return
+                
+                # Save prompt
+                prompt_id = self.prompt_store.save_prompt(
+                    content=content,
+                    name=name,
+                    tags=tags,
+                    metadata={"source": "browser-extension"}
+                )
+                
+                # Commit
+                self.git_mgr.commit(f"Browser save: {name or prompt_id}")
+                
+                # Send response
+                self.send_response(200)
+                self._send_cors_headers()
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                
+                response = json.dumps({
+                    "status": "success",
+                    "prompt_id": prompt_id
+                })
+                self.wfile.write(response.encode())
+                
+                logger.info(f"Saved prompt from browser: {prompt_id}")
+            
+            except Exception as e:
+                logger.error(f"Socket save error: {e}")
+                self.send_error(500, str(e))
+        else:
+            self.send_error(404)
+    
+    def _send_cors_headers(self):
+        """Send CORS headers for browser access."""
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+
+
 class PromptDaemon:
     """Auto-commit daemon for prompt repository."""
     
@@ -188,7 +278,9 @@ class PromptDaemon:
         watch_interval: int = 60,
         conflict_strategy: ConflictStrategy = "timestamp",
         use_llm: bool = False,
-        llm_model: str = "phi3.5"
+        llm_model: str = "phi3.5",
+        enable_socket: bool = False,
+        socket_port: int = 9090
     ):
         """
         Initialize daemon.
@@ -199,6 +291,8 @@ class PromptDaemon:
             conflict_strategy: How to resolve merge conflicts
             use_llm: Use LLM for commit message generation
             llm_model: Ollama model name for LLM
+            enable_socket: Enable HTTP socket server for browser extension
+            socket_port: Port for socket server (default: 9090)
         """
         self.repo_path = Path(repo_path)
         self.watch_interval = watch_interval
@@ -219,6 +313,53 @@ class PromptDaemon:
             logger.info(f"LLM commit generation enabled ({llm_model})")
         elif use_llm and not self.llm_generator.enabled:
             logger.warning("LLM requested but unavailable, using default messages")
+        
+        # Socket server for browser extension
+        self.enable_socket = enable_socket
+        self.socket_port = socket_port
+        self.socket_server = None
+        self.socket_thread = None
+        
+        if enable_socket:
+            self._start_socket_server()
+    
+    def _start_socket_server(self) -> None:
+        """Start HTTP socket server for browser extension."""
+        try:
+            prompt_store = PromptStore(str(self.repo_path))
+            
+            # Create handler with dependencies
+            def handler_factory(*args, **kwargs):
+                return SocketHandler(
+                    *args,
+                    prompt_store=prompt_store,
+                    git_mgr=self.git_mgr,
+                    **kwargs
+                )
+            
+            self.socket_server = HTTPServer(('localhost', self.socket_port), handler_factory)
+            
+            # Run server in separate thread
+            self.socket_thread = threading.Thread(
+                target=self.socket_server.serve_forever,
+                daemon=True
+            )
+            self.socket_thread.start()
+            
+            logger.info(f"Socket server started on http://localhost:{self.socket_port}")
+        
+        except Exception as e:
+            logger.error(f"Failed to start socket server: {e}")
+            self.enable_socket = False
+    
+    def _stop_socket_server(self) -> None:
+        """Stop socket server."""
+        if self.socket_server:
+            logger.info("Stopping socket server...")
+            self.socket_server.shutdown()
+            self.socket_server.server_close()
+            if self.socket_thread:
+                self.socket_thread.join(timeout=5)
     
     def run(self) -> None:
         """
@@ -228,16 +369,23 @@ class PromptDaemon:
         Press Ctrl+C to stop.
         """
         logger.info(f"Daemon started (interval: {self.watch_interval}s)")
+        if self.enable_socket:
+            logger.info(f"Browser extension socket enabled on port {self.socket_port}")
         
-        while True:
-            try:
-                self._check_and_commit()
-            except KeyboardInterrupt:
-                raise
-            except Exception as e:
-                logger.error(f"Error in daemon loop: {e}")
-            
-            time.sleep(self.watch_interval)
+        try:
+            while True:
+                try:
+                    self._check_and_commit()
+                except KeyboardInterrupt:
+                    raise
+                except Exception as e:
+                    logger.error(f"Error in daemon loop: {e}")
+                
+                time.sleep(self.watch_interval)
+        finally:
+            # Cleanup
+            if self.enable_socket:
+                self._stop_socket_server()
     
     def _check_and_commit(self) -> None:
         """Check for changes and commit if found."""

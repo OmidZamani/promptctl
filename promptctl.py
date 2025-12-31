@@ -22,6 +22,8 @@ from core.prompt_store import PromptStore
 from core.tag_manager import TagManager
 from core.daemon import PromptDaemon
 from core.batch_manager import BatchManager
+from core.dspy_optimizer import PromptOptimizer
+from core.agent import PromptAgent
 
 
 def cmd_save(args: argparse.Namespace) -> int:
@@ -202,7 +204,9 @@ def cmd_daemon(args: argparse.Namespace) -> int:
             watch_interval=args.interval,
             conflict_strategy=args.conflict_strategy,
             use_llm=args.use_llm,
-            llm_model=args.llm_model
+            llm_model=args.llm_model,
+            enable_socket=args.socket,
+            socket_port=args.socket_port
         )
         
         print(f"Starting promptctl daemon (interval: {args.interval}s)")
@@ -262,6 +266,160 @@ def cmd_diff(args: argparse.Namespace) -> int:
             print("No changes")
         
         return 0
+        
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_optimize(args: argparse.Namespace) -> int:
+    """Optimize a prompt using DSPy."""
+    try:
+        optimizer = PromptOptimizer(
+            repo_path=args.repo,
+            use_local_ollama=args.use_ollama
+        )
+        
+        print(f"Optimizing prompt: {args.prompt_id}")
+        print(f"Rounds: {args.rounds}")
+        
+        optimized_id, score = optimizer.optimize(
+            prompt_id=args.prompt_id,
+            rounds=args.rounds
+        )
+        
+        print(f"\n✓ Optimization complete!")
+        print(f"Optimized prompt: {optimized_id}")
+        print(f"Final score: {score:.2f}/100")
+        
+        return 0
+        
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_chain(args: argparse.Namespace) -> int:
+    """Chain multiple prompts together."""
+    try:
+        optimizer = PromptOptimizer(
+            repo_path=args.repo,
+            use_local_ollama=args.use_ollama
+        )
+        
+        print(f"Chaining {len(args.prompts)} prompts...")
+        
+        chain_id = optimizer.chain_prompts(
+            prompt_ids=args.prompts,
+            chain_name=args.name
+        )
+        
+        print(f"\n✓ Chain created: {chain_id}")
+        
+        return 0
+        
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_evaluate(args: argparse.Namespace) -> int:
+    """Evaluate a prompt against test cases."""
+    try:
+        optimizer = PromptOptimizer(
+            repo_path=args.repo,
+            use_local_ollama=args.use_ollama
+        )
+        
+        # Load test cases from file if provided
+        test_cases = []
+        if args.test_file:
+            import json
+            with open(args.test_file) as f:
+                test_cases = json.load(f)
+        
+        report = optimizer.evaluate(
+            prompt_id=args.prompt_id,
+            test_cases=test_cases
+        )
+        
+        print(f"\nEvaluation Report: {args.prompt_id}")
+        print("=" * 60)
+        print(f"Test cases: {report['test_count']}")
+        print(f"Average score: {report['average_score']:.2f}/100")
+        print("\nResults:")
+        for i, result in enumerate(report['results'], 1):
+            print(f"  Test {i}: {result['score']:.2f}/100")
+        
+        return 0
+        
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_agent(args: argparse.Namespace) -> int:
+    """Run autonomous agent to test and improve prompt."""
+    try:
+        # Load test cases from file if provided
+        test_cases = None
+        if args.test_file:
+            import json
+            with open(args.test_file) as f:
+                test_cases = json.load(f)
+        
+        agent = PromptAgent(
+            prompt_id=args.prompt_id,
+            repo_path=args.repo,
+            test_cases=test_cases
+        )
+        
+        print(f"Starting agent for prompt: {args.prompt_id}")
+        print(f"Rounds: {args.rounds}")
+        print(f"Target score: {args.min_score}")
+        print("\n" + "=" * 60 + "\n")
+        
+        best_id, score = agent.run(
+            rounds=args.rounds,
+            min_score=args.min_score
+        )
+        
+        # Print report
+        if args.report:
+            agent.print_report()
+        else:
+            print(f"\n✓ Agent run complete!")
+            print(f"Best version: {best_id}")
+            print(f"Final score: {score:.2f}/100")
+        
+        return 0
+        
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_test(args: argparse.Namespace) -> int:
+    """Quick test a prompt."""
+    try:
+        # Load test cases
+        test_cases = []
+        if args.test_file:
+            import json
+            with open(args.test_file) as f:
+                test_cases = json.load(f)
+        else:
+            # Use default test cases
+            test_cases = [
+                {"input": "Test 1", "expected": "Output 1"},
+                {"input": "Test 2", "expected": "Output 2"},
+                {"input": "Test 3", "expected": "Output 3"}
+            ]
+        
+        from core.agent import quick_test
+        score = quick_test(args.prompt_id, test_cases, args.repo)
+        
+        return 0 if score >= 70 else 1
         
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -334,6 +492,17 @@ def main() -> int:
         default="phi3.5",
         help="Ollama model name for LLM (default: phi3.5)"
     )
+    daemon_parser.add_argument(
+        "--socket",
+        action="store_true",
+        help="Enable HTTP socket server for browser extension"
+    )
+    daemon_parser.add_argument(
+        "--socket-port",
+        type=int,
+        default=9090,
+        help="Socket server port (default: 9090)"
+    )
     
     # Status command
     status_parser = subparsers.add_parser("status", help="Show status")
@@ -342,6 +511,37 @@ def main() -> int:
     # Diff command
     diff_parser = subparsers.add_parser("diff", help="Show diff")
     diff_parser.add_argument("--staged", action="store_true", help="Show staged changes")
+    
+    # Optimize command (DSPy)
+    optimize_parser = subparsers.add_parser("optimize", help="Optimize prompt with DSPy")
+    optimize_parser.add_argument("prompt_id", help="Prompt ID to optimize")
+    optimize_parser.add_argument("--rounds", type=int, default=3, help="Optimization rounds")
+    optimize_parser.add_argument("--use-ollama", action="store_true", help="Use local Ollama")
+    
+    # Chain command (DSPy)
+    chain_parser = subparsers.add_parser("chain", help="Chain prompts together")
+    chain_parser.add_argument("prompts", nargs="+", help="Prompt IDs to chain")
+    chain_parser.add_argument("--name", help="Chain name")
+    chain_parser.add_argument("--use-ollama", action="store_true", help="Use local Ollama")
+    
+    # Evaluate command (DSPy)
+    evaluate_parser = subparsers.add_parser("evaluate", help="Evaluate prompt")
+    evaluate_parser.add_argument("prompt_id", help="Prompt ID to evaluate")
+    evaluate_parser.add_argument("--test-file", help="JSON file with test cases")
+    evaluate_parser.add_argument("--use-ollama", action="store_true", help="Use local Ollama")
+    
+    # Agent command
+    agent_parser = subparsers.add_parser("agent", help="Run autonomous agent")
+    agent_parser.add_argument("prompt_id", help="Prompt ID to optimize")
+    agent_parser.add_argument("--rounds", type=int, default=5, help="Agent rounds")
+    agent_parser.add_argument("--min-score", type=float, default=90.0, help="Target score")
+    agent_parser.add_argument("--test-file", help="JSON file with test cases")
+    agent_parser.add_argument("--report", action="store_true", help="Print detailed report")
+    
+    # Test command
+    test_parser = subparsers.add_parser("test", help="Quick test prompt")
+    test_parser.add_argument("prompt_id", help="Prompt ID to test")
+    test_parser.add_argument("--test-file", help="JSON file with test cases")
     
     args = parser.parse_args()
     
@@ -365,6 +565,11 @@ def main() -> int:
         "daemon": cmd_daemon,
         "status": cmd_status,
         "diff": cmd_diff,
+        "optimize": cmd_optimize,
+        "chain": cmd_chain,
+        "evaluate": cmd_evaluate,
+        "agent": cmd_agent,
+        "test": cmd_test,
     }
     
     return handlers[args.command](args)
