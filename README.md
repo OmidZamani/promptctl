@@ -109,7 +109,17 @@ PromptCtl Quick Capture is a browser extension for capturing, organizing, and op
 
 ## 4. Installation
 
-### 4.1 Backend Server
+### 4.1 Docker (Recommended)
+
+```bash
+git clone https://github.com/OmidZamani/promptctl.git
+cd promptctl
+docker-compose up -d
+```
+
+Server runs on `http://localhost:8741`. Done.
+
+### 4.2 Manual (Alternative)
 
 ```bash
 git clone https://github.com/OmidZamani/promptctl.git
@@ -118,9 +128,7 @@ pip install -r requirements.txt
 python promptctl.py
 ```
 
-Server runs on `http://localhost:8741`.
-
-### 4.2 Browser Extension
+### 4.3 Browser Extension
 
 **Chrome:**
 1. Navigate to `chrome://extensions/`
@@ -132,12 +140,6 @@ Server runs on `http://localhost:8741`.
 1. Navigate to `about:debugging#/runtime/this-firefox`
 2. Click "Load Temporary Add-on"
 3. Select `extension/manifest.json`
-
-### 4.3 Docker
-
-```bash
-docker-compose up -d
-```
 
 ## 5. Configuration
 
