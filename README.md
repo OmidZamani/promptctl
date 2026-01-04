@@ -30,7 +30,7 @@ PromptCtl Quick Capture is a browser extension for capturing, organizing, and op
 
 ### 3.1 Capture Tab
 
-![Capture Tab](docs/screenshots/01-capture-tab.png)
+<img src="docs/screenshots/01-capture-tab.png" width="320" alt="Capture Tab">
 
 **Header:**
 - Application title with connection status indicator (green = connected)
@@ -42,7 +42,7 @@ PromptCtl Quick Capture is a browser extension for capturing, organizing, and op
 
 ### 3.2 Capture Form (Intent & Goals)
 
-![Capture Form](docs/screenshots/02-capture-form.png)
+<img src="docs/screenshots/02-capture-form.png" width="320" alt="Capture Form">
 
 **Intent & Goals Section:**
 - **Analyze** button — Auto-detect prompt type and metadata
@@ -66,7 +66,7 @@ PromptCtl Quick Capture is a browser extension for capturing, organizing, and op
 
 ### 3.3 Prompts Tab
 
-![Prompts Tab](docs/screenshots/03-prompts-tab.png)
+<img src="docs/screenshots/03-prompts-tab.png" width="320" alt="Prompts Tab">
 
 **Search:**
 - Filter by content, name, tag, or hash
@@ -79,7 +79,7 @@ PromptCtl Quick Capture is a browser extension for capturing, organizing, and op
 
 ### 3.4 Jobs Tab
 
-![Jobs Tab](docs/screenshots/04-jobs-tab.png)
+<img src="docs/screenshots/04-jobs-tab.png" width="320" alt="Jobs Tab">
 
 **Background Jobs:**
 - Lists active DSPy optimization jobs
@@ -88,8 +88,8 @@ PromptCtl Quick Capture is a browser extension for capturing, organizing, and op
 
 ### 3.5 Settings Tab
 
-![Settings Header](docs/screenshots/05-settings-header.png)
-![Settings Full](docs/screenshots/06-settings-full.png)
+<img src="docs/screenshots/05-settings-header.png" width="320" alt="Settings Header">
+<img src="docs/screenshots/06-settings-full.png" width="320" alt="Settings Full">
 
 **AI Provider:**
 - **Provider** — Select backend (Local Ollama, OpenAI, etc.)
