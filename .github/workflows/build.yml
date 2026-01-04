@@ -19,7 +19,7 @@ jobs:
       - name: Create Chrome ZIP
         run: |
           cd extension
-          zip -r ../promptctl-chrome-${{ github.sha }}.zip . \
+          zip -r ../promptctl-chrome.zip . \
             -x "*.git*" \
             -x "*.md" \
             -x "generate_icons.py" \
@@ -29,7 +29,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: promptctl-chrome
-          path: promptctl-chrome-*.zip
+          path: promptctl-chrome.zip
           retention-days: 30
 
   build-firefox:
@@ -42,7 +42,6 @@ jobs:
       - name: Create Firefox manifest
         run: |
           cd extension
-          # Create Firefox-compatible manifest (add browser_specific_settings)
           jq '. + {
             "browser_specific_settings": {
               "gecko": {
@@ -56,7 +55,7 @@ jobs:
       - name: Create Firefox ZIP
         run: |
           cd extension
-          zip -r ../promptctl-firefox-${{ github.sha }}.zip . \
+          zip -r ../promptctl-firefox.zip . \
             -x "*.git*" \
             -x "*.md" \
             -x "generate_icons.py" \
@@ -66,7 +65,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: promptctl-firefox
-          path: promptctl-firefox-*.zip
+          path: promptctl-firefox.zip
           retention-days: 30
 
   release:
@@ -77,25 +76,20 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download Chrome artifact
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: promptctl-chrome
+          path: artifacts
 
-      - name: Download Firefox artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: promptctl-firefox
-
-      - name: Rename artifacts for release
+      - name: Prepare release files
         run: |
-          mv promptctl-chrome-*.zip promptctl-chrome-${{ github.ref_name }}.zip
-          mv promptctl-firefox-*.zip promptctl-firefox-${{ github.ref_name }}.zip
+          mkdir -p release
+          cp artifacts/promptctl-chrome/promptctl-chrome.zip release/promptctl-chrome-${{ github.ref_name }}.zip
+          cp artifacts/promptctl-firefox/promptctl-firefox.zip release/promptctl-firefox-${{ github.ref_name }}.zip
+          ls -la release/
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          files: |
-            promptctl-chrome-*.zip
-            promptctl-firefox-*.zip
+          files: release/*
           generate_release_notes: true
