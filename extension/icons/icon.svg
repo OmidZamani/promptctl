@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7c3aed"/>
+      <stop offset="100%" style="stop-color:#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="docGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff"/>
+      <stop offset="100%" style="stop-color:#f3f4f6"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Rounded background -->
+  <rect x="4" y="4" width="120" height="120" rx="24" ry="24" fill="url(#bgGrad)"/>
+  
+  <!-- Document shape -->
+  <path d="M36 24 L80 24 L96 40 L96 104 L36 104 Z" fill="url(#docGrad)" stroke="#e5e7eb" stroke-width="1"/>
+  
+  <!-- Document fold -->
+  <path d="M80 24 L80 40 L96 40 Z" fill="#e5e7eb"/>
+  
+  <!-- Text lines on document -->
+  <rect x="46" y="52" width="40" height="4" rx="2" fill="#9ca3af"/>
+  <rect x="46" y="62" width="32" height="4" rx="2" fill="#9ca3af"/>
+  <rect x="46" y="72" width="36" height="4" rx="2" fill="#9ca3af"/>
+  <rect x="46" y="82" width="28" height="4" rx="2" fill="#9ca3af"/>
+  
+  <!-- Capture arrow (into document) -->
+  <g fill="#10b981" stroke="#10b981" stroke-width="2">
+    <!-- Arrow shaft -->
+    <rect x="16" y="62" width="24" height="8" rx="2"/>
+    <!-- Arrow head -->
+    <polygon points="38,54 52,66 38,78"/>
+  </g>
+  
+  <!-- Small sparkle/highlight -->
+  <circle cx="88" cy="28" r="3" fill="#fbbf24" opacity="0.9"/>
+</svg>

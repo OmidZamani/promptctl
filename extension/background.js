@@ -57,22 +57,52 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 chrome.commands.onCommand.addListener(async (command) => {
   if (command === 'save-prompt') {
     try {
-      // Query for active tab
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      // Query for active tab - try multiple strategies
+      let tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      
+      // If no current window, try last focused window
       if (!tabs || tabs.length === 0) {
-        console.error('No active tab found');
+        tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      }
+      
+      // Still no tabs? Try any active tab
+      if (!tabs || tabs.length === 0) {
+        tabs = await chrome.tabs.query({ active: true });
+      }
+      
+      if (!tabs || tabs.length === 0) {
+        console.log('No active tab found - cannot save selection');
+        showNotification('PromptCtl', 'No active tab found. Open a webpage first.');
         return;
       }
       
       const tab = tabs[0];
+      
+      // Make sure tab has a valid ID and URL
+      if (!tab.id || tab.id === chrome.tabs.TAB_ID_NONE) {
+        console.log('Invalid tab ID');
+        showNotification('PromptCtl', 'Cannot access this tab.');
+        return;
+      }
+      
+      // Skip chrome:// and extension pages
+      if (tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://'))) {
+        showNotification('PromptCtl', 'Cannot capture from browser internal pages.');
+        return;
+      }
       
       // Send message to content script to get selection
       chrome.tabs.sendMessage(tab.id, { action: 'getSelection' }, async (response) => {
         // Check for errors
         if (chrome.runtime.lastError) {
           console.log('Content script not ready:', chrome.runtime.lastError.message);
-          // Just open popup instead
-          chrome.action.openPopup();
+          // Try to open popup as fallback - but handle the error gracefully
+          try {
+            await chrome.action.openPopup();
+          } catch (popupError) {
+            console.log('Could not open popup:', popupError.message);
+            showNotification('PromptCtl', 'Click the extension icon to open.');
+          }
           return;
         }
         
@@ -85,12 +115,18 @@ chrome.commands.onCommand.addListener(async (command) => {
             showNotification('PromptCtl Error', 'Could not save. Is daemon running?');
           }
         } else {
-          // No selection, just open popup
-          chrome.action.openPopup();
+          // No selection, try to open popup
+          try {
+            await chrome.action.openPopup();
+          } catch (popupError) {
+            console.log('Could not open popup:', popupError.message);
+            showNotification('PromptCtl', 'No text selected. Click extension icon to open.');
+          }
         }
       });
     } catch (error) {
       console.error('Keyboard shortcut error:', error);
+      showNotification('PromptCtl', 'Shortcut failed. Try clicking the extension icon.');
     }
   }
 });

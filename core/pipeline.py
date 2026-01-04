@@ -133,6 +133,7 @@ class DSPyPipeline:
     def _register_handlers(self) -> None:
         """Register job handlers for async processing."""
         self.queue.register_handler("optimize", self._handle_optimize_job)
+        self.queue.register_handler("optimize_intent", self._handle_optimize_intent_job)
         self.queue.register_handler("evaluate", self._handle_evaluate_job)
         self.queue.register_handler("chain", self._handle_chain_job)
         self.queue.register_handler("agent", self._handle_agent_job)
@@ -144,6 +145,8 @@ class DSPyPipeline:
         tags: Optional[List[str]] = None,
         metadata: Optional[Dict[str, Any]] = None,
         auto_optimize: Optional[bool] = None,
+        intent: Optional[Dict[str, Any]] = None,
+        parent_id: Optional[str] = None,
         source: str = "api"
     ) -> PipelineResult:
         """
@@ -155,6 +158,8 @@ class DSPyPipeline:
             tags: Optional tags
             metadata: Optional metadata
             auto_optimize: Override config auto_optimize
+            intent: Optional intent data for optimization
+            parent_id: Optional parent prompt ID for chaining
             source: Source identifier (browser, cli, api)
         
         Returns:
@@ -169,12 +174,15 @@ class DSPyPipeline:
             prompt_meta = metadata or {}
             prompt_meta["source"] = source
             prompt_meta["pipeline_processed"] = True
+            if intent:
+                prompt_meta["intent"] = intent
             
             prompt_id = self.store.save_prompt(
                 content=content,
                 name=name,
                 tags=combined_tags,
-                metadata=prompt_meta
+                metadata=prompt_meta,
+                parent_id=parent_id
             )
             stages_completed.append("save")
             logger.info(f"Pipeline: Saved prompt {prompt_id}")
@@ -193,13 +201,22 @@ class DSPyPipeline:
             
             job_id = None
             if should_optimize and HAS_DSPY:
-                # Submit optimization job
-                job_id = self.queue.submit("optimize", {
-                    "prompt_id": prompt_id,
-                    "rounds": self.config.optimization_rounds,
-                    "use_local_ollama": self.config.use_local_ollama
-                })
-                stages_completed.append("optimize_queued")
+                # Use intent-aware optimization if intent provided
+                if intent:
+                    job_id = self.queue.submit("optimize_intent", {
+                        "prompt_id": prompt_id,
+                        "intent": intent,
+                        "rounds": self.config.optimization_rounds,
+                        "use_local_ollama": self.config.use_local_ollama
+                    })
+                    stages_completed.append("optimize_intent_queued")
+                else:
+                    job_id = self.queue.submit("optimize", {
+                        "prompt_id": prompt_id,
+                        "rounds": self.config.optimization_rounds,
+                        "use_local_ollama": self.config.use_local_ollama
+                    })
+                    stages_completed.append("optimize_queued")
                 logger.info(f"Pipeline: Queued optimization job {job_id}")
             
             return PipelineResult(
@@ -322,6 +339,50 @@ class DSPyPipeline:
             result = self._handle_chain_job(params, lambda p, m: None)
             return result
     
+    def optimize_with_intent(
+        self,
+        prompt_id: str,
+        intent: Dict[str, Any],
+        rounds: Optional[int] = None,
+        async_mode: bool = True,
+        provider_settings: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Optimize a prompt using explicit user intent.
+        
+        Args:
+            prompt_id: ID of prompt to optimize
+            intent: Intent data (prompt_type, target_audience, desired_outcome, etc.)
+            rounds: Number of optimization rounds
+            async_mode: Run asynchronously
+            provider_settings: Provider configuration (provider, api keys, model names)
+        
+        Returns:
+            If async: {"job_id": str}
+            If sync: {"optimized_id": str, "score": float}
+        """
+        if not HAS_DSPY:
+            return {"error": "DSPy not installed"}
+        
+        # Build provider config from settings
+        provider = provider_settings.get('provider', 'ollama') if provider_settings else 'ollama'
+        use_local_ollama = provider == 'ollama'
+        
+        params = {
+            "prompt_id": prompt_id,
+            "intent": intent,
+            "rounds": rounds or self.config.optimization_rounds,
+            "use_local_ollama": use_local_ollama,
+            "provider_settings": provider_settings or {}
+        }
+        
+        if async_mode:
+            job_id = self.queue.submit("optimize_intent", params)
+            return {"job_id": job_id, "status": "queued"}
+        else:
+            result = self._handle_optimize_intent_job(params, lambda p, m: None)
+            return result
+    
     def run_agent(
         self,
         prompt_id: str,
@@ -439,6 +500,71 @@ class DSPyPipeline:
             "optimized_id": optimized_id,
             "score": score,
             "source_prompt": params["prompt_id"],
+            "rounds": params.get("rounds", 3)
+        }
+    
+    def _handle_optimize_intent_job(
+        self,
+        params: Dict[str, Any],
+        progress_callback: Callable
+    ) -> Dict[str, Any]:
+        """Handle intent-aware optimization job with provider settings."""
+        if not HAS_DSPY or PromptOptimizer is None:
+            return {"error": "DSPy not installed"}
+        
+        provider_settings = params.get("provider_settings", {})
+        provider = provider_settings.get('provider', 'ollama')
+        rounds = params.get("rounds", 3)
+        
+        progress_callback(5, f"Initializing {provider} optimizer")
+        
+        # Create optimizer with provider-specific settings
+        optimizer = PromptOptimizer(
+            repo_path=str(self.repo_path),
+            use_local_ollama=params.get("use_local_ollama", True),
+            provider_settings=provider_settings
+        )
+        
+        progress_callback(10, f"Optimizer ready (provider: {provider})")
+        
+        # Calculate progress increments per round
+        # Reserve: 5% init, 5% ready, 80% for rounds (80/rounds each), 10% finalize
+        progress_per_round = 80 // rounds
+        
+        def round_progress(round_num, total_rounds, phase):
+            base = 10 + (round_num * progress_per_round)
+            if phase == 'scoring':
+                progress_callback(base, f"Round {round_num + 1}/{total_rounds}: Scoring prompt")
+            elif phase == 'optimizing':
+                progress_callback(base + progress_per_round // 2, f"Round {round_num + 1}/{total_rounds}: Optimizing")
+        
+        optimized_id, score = optimizer.optimize_with_intent(
+            prompt_id=params["prompt_id"],
+            intent=params.get("intent", {}),
+            rounds=rounds,
+            progress_callback=round_progress
+        )
+        
+        progress_callback(90, "Intent-aware optimization complete")
+        
+        # Commit result (if there are changes)
+        if self.config.auto_commit:
+            try:
+                intent_type = params.get("intent", {}).get("prompt_type", "general")
+                self.git_mgr.commit(
+                    f"Intent-aware optimization: {params['prompt_id']} -> {optimized_id} "
+                    f"(score: {score:.2f}, type: {intent_type})"
+                )
+            except ValueError:
+                pass
+        
+        progress_callback(100, "Done")
+        
+        return {
+            "optimized_id": optimized_id,
+            "score": score,
+            "source_prompt": params["prompt_id"],
+            "intent": params.get("intent", {}),
             "rounds": params.get("rounds", 3)
         }
     

@@ -23,6 +23,7 @@
       <button class="tab active" data-tab="capture">Capture</button>
       <button class="tab" data-tab="prompts">Prompts</button>
       <button class="tab" data-tab="jobs">Jobs</button>
+      <button class="tab" data-tab="settings">⚙️</button>
     </div>
     
     <!-- Capture Tab -->
@@ -33,8 +34,48 @@
           <textarea 
             id="promptText" 
             placeholder="Enter prompt or select text on page..."
-            rows="5"
+            rows="4"
           ></textarea>
+        </div>
+        
+        <!-- Intent & Goals Section -->
+        <div class="intent-section" id="intentSection">
+          <div class="intent-header" id="intentHeader">
+            <span>🎯 Intent & Goals</span>
+            <button id="analyzeIntentBtn" class="analyze-btn" title="Analyze with AI">
+              <span id="analyzeSpinner" class="spinner hidden"></span>
+              <span id="analyzeText">Analyze</span>
+            </button>
+          </div>
+          <div class="intent-body" id="intentBody">
+            <div class="intent-row">
+              <label>Type</label>
+              <select id="intentType">
+                <option value="">-- Select or auto-detect --</option>
+                <option value="code_generation">Code Generation</option>
+                <option value="creative_writing">Creative Writing</option>
+                <option value="research">Research</option>
+                <option value="summarization">Summarization</option>
+                <option value="translation">Translation</option>
+                <option value="conversation">Conversation</option>
+                <option value="data_analysis">Data Analysis</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="intent-row">
+              <label>Target Audience</label>
+              <input type="text" id="intentAudience" placeholder="e.g., developers, students, general users">
+            </div>
+            <div class="intent-row">
+              <label>Desired Outcome</label>
+              <input type="text" id="intentOutcome" placeholder="What should this prompt achieve?">
+            </div>
+            <div class="intent-row">
+              <label>Constraints</label>
+              <input type="text" id="intentConstraints" placeholder="e.g., max 100 words, formal tone">
+            </div>
+            <div class="intent-questions" id="intentQuestions"></div>
+          </div>
         </div>
         
         <div class="form-group">
@@ -55,13 +96,21 @@
           >
         </div>
         
+        <div class="form-group">
+          <label for="parentPrompt">Link to previous prompt (chain)</label>
+          <select id="parentPrompt">
+            <option value="">-- New conversation --</option>
+          </select>
+          <div class="chain-indicator" id="chainIndicator" style="display: none;"></div>
+        </div>
+        
         <div class="form-group checkbox-group">
           <label>
             <input type="checkbox" id="autoTag">
             Auto-tag from domain
           </label>
           <label>
-            <input type="checkbox" id="autoOptimize">
+            <input type="checkbox" id="autoOptimize" checked>
             Auto-optimize with DSPy
           </label>
         </div>
@@ -76,17 +125,43 @@
         </div>
         
         <div class="message" id="message"></div>
+        
+        <!-- Recent Saves Section -->
+        <div class="recent-saves" id="recentSaves" style="display: none;"></div>
       </div>
     </div>
     
     <!-- Prompts Tab -->
     <div class="tab-content" id="tab-prompts">
       <div class="list-header">
-        <input type="text" id="promptSearch" placeholder="Search prompts...">
+        <input type="text" id="promptSearch" placeholder="Search by content, name, tag, or hash...">
         <button id="refreshPrompts" class="icon-btn">🔄</button>
       </div>
       <div class="prompts-list" id="promptsList">
         <p class="loading">Loading prompts...</p>
+      </div>
+      
+      <!-- Prompt Detail Panel -->
+      <div class="prompt-detail" id="promptDetail" style="display: none;">
+        <div class="detail-header">
+          <span class="detail-title" id="detailTitle"></span>
+          <button class="close-btn" id="closeDetail">✕</button>
+        </div>
+        <div class="detail-content" id="detailContent"></div>
+        <div class="detail-meta" id="detailMeta"></div>
+        <div class="detail-chain" id="detailChain" style="display: none;"></div>
+        <div class="detail-cli">
+          <label>CLI Command:</label>
+          <div class="cli-command" id="detailCli"></div>
+          <button class="copy-cli-btn" id="copyCli">📋 Copy</button>
+        </div>
+        <div class="detail-actions">
+          <button class="action-btn" id="detailOptimize">🚀 Optimize</button>
+          <button class="action-btn" id="detailViewOptimized" style="display: none;">✨ View Optimized</button>
+          <button class="action-btn" id="detailViewSource" style="display: none;">📄 View Original</button>
+          <button class="action-btn" id="detailViewChain">🔗 View Chain</button>
+          <button class="action-btn" id="detailLinkNew">➕ Add Follow-up</button>
+        </div>
       </div>
     </div>
     
@@ -101,8 +176,163 @@
       </div>
     </div>
     
+    <!-- Settings Tab -->
+    <div class="tab-content" id="tab-settings">
+      <div class="settings-section">
+        <h3>🤖 AI Provider</h3>
+        <div class="setting-row">
+          <label>Provider</label>
+          <select id="settingsProvider">
+            <option value="ollama">Local Ollama</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+          </select>
+        </div>
+        
+        <div id="ollamaSettings" class="provider-settings">
+          <div class="setting-row">
+            <label>Ollama URL</label>
+            <input type="text" id="settingsOllamaUrl" placeholder="http://localhost:11434">
+          </div>
+          <div class="setting-row">
+            <label>Model</label>
+            <input type="text" id="settingsModel" placeholder="phi3.5:latest">
+          </div>
+        </div>
+        
+        <div id="openaiSettings" class="provider-settings" style="display: none;">
+          <div class="setting-row">
+            <label>API Key</label>
+            <input type="password" id="settingsOpenaiKey" placeholder="sk-...">
+          </div>
+          <div class="setting-row">
+            <label>Model</label>
+            <select id="settingsOpenaiModel">
+              <optgroup label="GPT-5 Series">
+                <option value="gpt-5">GPT-5</option>
+                <option value="gpt-5-mini">GPT-5 Mini</option>
+                <option value="gpt-5-nano">GPT-5 Nano</option>
+              </optgroup>
+              <optgroup label="GPT-4 Series">
+                <option value="gpt-4.1">GPT-4.1</option>
+                <option value="gpt-4o">GPT-4o</option>
+                <option value="gpt-4o-mini">GPT-4o Mini</option>
+              </optgroup>
+              <optgroup label="Reasoning Models">
+                <option value="o1-pro">o1 Pro</option>
+                <option value="o3">o3</option>
+                <option value="o3-pro">o3 Pro</option>
+                <option value="o3-deep-research">o3 Deep Research</option>
+                <option value="o3-mini">o3 Mini</option>
+                <option value="o4-mini">o4 Mini</option>
+              </optgroup>
+              <optgroup label="Specialized">
+                <option value="gpt-4o-realtime-preview">Realtime API</option>
+                <option value="gpt-4o-audio-preview">Audio Preview</option>
+                <option value="gpt-4o-search-preview">Search</option>
+              </optgroup>
+            </select>
+          </div>
+        </div>
+        
+        <div id="anthropicSettings" class="provider-settings" style="display: none;">
+          <div class="setting-row">
+            <label>API Key</label>
+            <input type="password" id="settingsAnthropicKey" placeholder="sk-ant-...">
+          </div>
+          <div class="setting-row">
+            <label>Model</label>
+            <select id="settingsAnthropicModel">
+              <optgroup label="Claude 4.5 Series">
+                <option value="claude-opus-4-5-20251101">Claude 4.5 Opus</option>
+                <option value="claude-sonnet-4-5-20250929">Claude 4.5 Sonnet</option>
+                <option value="claude-haiku-4-5-20251001">Claude 4.5 Haiku</option>
+              </optgroup>
+              <optgroup label="Claude 4 Series">
+                <option value="claude-opus-4-20250514">Claude 4 Opus</option>
+                <option value="claude-sonnet-4-20250514">Claude 4 Sonnet</option>
+              </optgroup>
+              <optgroup label="Claude 3.x Series">
+                <option value="claude-3-7-sonnet-20250219">Claude 3.7 Sonnet</option>
+                <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+              </optgroup>
+            </select>
+          </div>
+        </div>
+      </div>
+      
+      <div class="settings-section">
+        <h3>🔧 Optimizer</h3>
+        <div class="setting-row checkbox">
+          <label>
+            <input type="checkbox" id="settingsEnableDspy" checked>
+            Enable DSPy Optimization
+          </label>
+        </div>
+        <div class="setting-row">
+          <label>Optimization Rounds</label>
+          <select id="settingsRounds">
+            <option value="1">1 round (fast)</option>
+            <option value="2">2 rounds</option>
+            <option value="3" selected>3 rounds (balanced)</option>
+            <option value="5">5 rounds (thorough)</option>
+          </select>
+        </div>
+      </div>
+      
+      <div class="settings-status" id="settingsStatus"></div>
+      
+      <div class="settings-actions">
+        <button id="saveSettingsBtn" class="save-btn">💾 Save Settings</button>
+        <button id="testConnectionBtn" class="test-btn">🔌 Test Connection</button>
+      </div>
+    </div>
+    
     <div class="footer">
       <p>Shortcut: <kbd>Ctrl+Shift+S</kbd> to save selection</p>
+    </div>
+  </div>
+  
+  <!-- Optimization Goal Modal -->
+  <div class="modal-overlay" id="optimizeModal" style="display: none;">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>🎯 Optimization Goal</h3>
+        <button class="close-btn" id="closeOptimizeModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-description">What do you want to improve about this prompt?</p>
+        
+        <div class="form-group">
+          <label>Primary Goal</label>
+          <select id="optimizeGoal">
+            <option value="clarity">📝 Clarity — Make it clearer and easier to understand</option>
+            <option value="accuracy">🎯 Accuracy — Improve precision and correctness</option>
+            <option value="conciseness">✂️ Conciseness — Make it shorter without losing meaning</option>
+            <option value="completeness">📋 Completeness — Add missing details or context</option>
+            <option value="style">🎨 Style — Improve tone, voice, or formatting</option>
+            <option value="safety">🛡️ Safety — Make it safer and more responsible</option>
+            <option value="engagement">💬 Engagement — Make it more compelling or persuasive</option>
+            <option value="specificity">🔍 Specificity — Add more specific instructions or constraints</option>
+            <option value="general">⚡ General — Overall improvement (balanced)</option>
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label>Additional Notes (optional)</label>
+          <textarea id="optimizeNotes" rows="2" placeholder="Any specific aspects to focus on..."></textarea>
+        </div>
+        
+        <div class="modal-info">
+          <span class="provider-badge" id="modalProviderBadge">🤖 Ollama</span>
+          <span class="rounds-badge" id="modalRoundsBadge">3 rounds</span>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="cancel-btn" id="cancelOptimize">Cancel</button>
+        <button class="confirm-btn" id="confirmOptimize">🚀 Start Optimization</button>
+      </div>
     </div>
   </div>
   

@@ -86,6 +86,46 @@ logger = logging.getLogger(__name__)
 
 ConflictStrategy = Literal["ours", "theirs", "manual", "timestamp"]
 
+# Default settings
+DEFAULT_SETTINGS = {
+    "provider": "ollama",
+    "ollama_url": "http://localhost:11434",
+    "model": "phi3.5:latest",
+    "openai_key": "",
+    "openai_model": "gpt-4o-mini",
+    "anthropic_key": "",
+    "anthropic_model": "claude-3-5-sonnet-20241022",
+    "dspy_enabled": True,
+    "optimization_rounds": 3
+}
+
+
+def load_settings(repo_path: str) -> Dict[str, Any]:
+    """Load settings from .settings.json or return defaults."""
+    settings_file = Path(repo_path) / ".settings.json"
+    try:
+        if settings_file.exists():
+            with open(settings_file) as f:
+                stored = json.load(f)
+                # Merge with defaults to ensure all keys exist
+                return {**DEFAULT_SETTINGS, **stored}
+    except Exception as e:
+        logger.warning(f"Failed to load settings: {e}")
+    return DEFAULT_SETTINGS.copy()
+
+
+def save_settings(repo_path: str, settings: Dict[str, Any]) -> None:
+    """Save settings to .settings.json."""
+    settings_file = Path(repo_path) / ".settings.json"
+    try:
+        # Don't save API keys to file (security) - keep them only in extension storage
+        safe_settings = {k: v for k, v in settings.items() if 'key' not in k.lower()}
+        with open(settings_file, 'w') as f:
+            json.dump(safe_settings, f, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to save settings: {e}")
+        raise
+
 
 class LLMCommitGenerator:
     """
@@ -249,10 +289,15 @@ class SocketHandler(BaseHTTPRequestHandler):
                 self._handle_health()
             
             elif path_parts[0] == 'prompts':
-                if len(path_parts) > 1:
+                if len(path_parts) > 2 and path_parts[2] == 'chain':
+                    self._handle_get_chain(path_parts[1])
+                elif len(path_parts) > 1:
                     self._handle_get_prompt(path_parts[1])
                 else:
                     self._handle_list_prompts(query)
+            
+            elif path_parts[0] == 'search':
+                self._handle_search(query)
             
             elif path_parts[0] == 'jobs':
                 if len(path_parts) > 1:
@@ -262,6 +307,9 @@ class SocketHandler(BaseHTTPRequestHandler):
             
             elif path_parts[0] == 'tags':
                 self._handle_list_tags()
+            
+            elif path_parts[0] == 'settings':
+                self._handle_get_settings()
             
             else:
                 self.send_error(404, f"Not found: {self.path}")
@@ -292,6 +340,15 @@ class SocketHandler(BaseHTTPRequestHandler):
             elif path_parts[0] == 'agent':
                 self._handle_agent(data)
             
+            elif path_parts[0] == 'analyze-intent':
+                self._handle_analyze_intent(data)
+            
+            elif path_parts[0] == 'optimize-with-intent':
+                self._handle_optimize_with_intent(data)
+            
+            elif path_parts[0] == 'settings':
+                self._handle_save_settings(data)
+            
             else:
                 self.send_error(404, f"Not found: {self.path}")
         
@@ -304,15 +361,23 @@ class SocketHandler(BaseHTTPRequestHandler):
     # GET handlers
     def _handle_health(self):
         """Health check endpoint."""
+        from .dspy_optimizer import HAS_DSPY
+        
         queue = get_queue()
         jobs = queue.get_all_jobs(5)
         pending = sum(1 for j in jobs if j['status'] == 'pending')
         running = sum(1 for j in jobs if j['status'] == 'running')
         
+        # Get DSPy availability and model info
+        dspy_available = HAS_DSPY and self.pipeline is not None
+        model_name = "phi3.5:latest"  # Default, could be read from settings
+        
         self._send_json({
             "status": "ok",
             "service": "promptctl",
             "pipeline": self.pipeline is not None,
+            "dspy_available": dspy_available,
+            "model": model_name if dspy_available else None,
             "jobs_pending": pending,
             "jobs_running": running
         })
@@ -333,9 +398,31 @@ class SocketHandler(BaseHTTPRequestHandler):
         """Get specific prompt endpoint."""
         try:
             prompt = self.prompt_store.get_prompt(prompt_id)
+            # Add chain info
+            prompt["has_chain"] = self.prompt_store.has_chain(prompt_id)
             self._send_json(prompt)
         except ValueError as e:
             self._send_json({"error": str(e)}, 404)
+    
+    def _handle_get_chain(self, prompt_id: str):
+        """Get all prompts in a chain."""
+        try:
+            chain = self.prompt_store.get_chain(prompt_id)
+            self._send_json({"chain": chain, "count": len(chain)})
+        except ValueError as e:
+            self._send_json({"error": str(e)}, 404)
+    
+    def _handle_search(self, query: Dict):
+        """Search prompts by content, ID, tags, or hash."""
+        q = query.get('q', [''])[0]
+        limit = int(query.get('limit', [20])[0])
+        
+        if not q:
+            self._send_json({"error": "Query parameter 'q' required"}, 400)
+            return
+        
+        results = self.prompt_store.search_prompts(q, limit=limit)
+        self._send_json({"results": results, "count": len(results), "query": q})
     
     def _handle_list_jobs(self, query: Dict):
         """List jobs endpoint."""
@@ -367,13 +454,29 @@ class SocketHandler(BaseHTTPRequestHandler):
         tags = tag_mgr.get_all_tags_with_counts()
         self._send_json({"tags": tags})
     
+    def _handle_get_settings(self):
+        """Get current settings."""
+        settings = load_settings(str(self.prompt_store.repo_path))
+        self._send_json(settings)
+    
+    def _handle_save_settings(self, data: Dict):
+        """Save settings."""
+        save_settings(str(self.prompt_store.repo_path), data)
+        logger.info(f"Settings updated: provider={data.get('provider', 'ollama')}")
+        self._send_json({"status": "success", "message": "Settings saved"})
+    
     # POST handlers
     def _handle_save(self, data: Dict):
         """Save prompt endpoint."""
         content = data.get('content', '')
         name = data.get('name')
         tags = data.get('tags', [])
-        auto_optimize = data.get('auto_optimize', False)
+        parent_id = data.get('parent_id')  # For chaining
+        intent = data.get('intent')  # Optional intent data
+        # Auto-enable optimization when intent is provided, otherwise use explicit value or None (config default)
+        auto_optimize = data.get('auto_optimize')
+        if auto_optimize is None and intent:
+            auto_optimize = True  # Intent implies optimization
         
         if not content:
             self._send_json({"error": "Content required"}, 400)
@@ -386,6 +489,8 @@ class SocketHandler(BaseHTTPRequestHandler):
                 name=name,
                 tags=tags,
                 auto_optimize=auto_optimize,
+                intent=intent,
+                parent_id=parent_id,
                 source="browser"
             )
             
@@ -397,11 +502,15 @@ class SocketHandler(BaseHTTPRequestHandler):
             })
         else:
             # Fallback to direct save
+            metadata = {"source": "browser-extension"}
+            if intent:
+                metadata["intent"] = intent
             prompt_id = self.prompt_store.save_prompt(
                 content=content,
                 name=name,
                 tags=tags,
-                metadata={"source": "browser-extension"}
+                metadata=metadata,
+                parent_id=parent_id
             )
             self.git_mgr.commit(f"Browser save: {name or prompt_id}")
             
@@ -411,6 +520,68 @@ class SocketHandler(BaseHTTPRequestHandler):
             })
         
         logger.info(f"Saved prompt from browser: {name or 'unnamed'}")
+    
+    def _handle_analyze_intent(self, data: Dict):
+        """Analyze prompt intent using phi3.5."""
+        content = data.get('content', '')
+        
+        if not content:
+            self._send_json({"error": "Content required"}, 400)
+            return
+        
+        if not self.pipeline:
+            self._send_json({"error": "Pipeline not available"}, 503)
+            return
+        
+        try:
+            # Use the optimizer's infer_intent method
+            from .dspy_optimizer import PromptOptimizer, HAS_DSPY
+            
+            if not HAS_DSPY:
+                self._send_json({"error": "DSPy not available"}, 503)
+                return
+            
+            optimizer = PromptOptimizer(
+                repo_path=str(self.prompt_store.repo_path),
+                use_local_ollama=True
+            )
+            
+            intent = optimizer.infer_intent(content)
+            self._send_json(intent)
+            logger.info(f"Intent analyzed: type={intent.get('prompt_type', 'unknown')}")
+            
+        except Exception as e:
+            logger.error(f"Intent analysis failed: {e}")
+            self._send_json({"error": str(e)}, 500)
+    
+    def _handle_optimize_with_intent(self, data: Dict):
+        """Optimize prompt using explicit intent with provider settings."""
+        prompt_id = data.get('prompt_id')
+        intent = data.get('intent', {})
+        rounds = data.get('rounds', 3)
+        async_mode = data.get('async', True)
+        provider_settings = data.get('provider_settings', {})
+        
+        if not prompt_id:
+            self._send_json({"error": "prompt_id required"}, 400)
+            return
+        
+        if not self.pipeline:
+            self._send_json({"error": "Pipeline not available"}, 503)
+            return
+        
+        # Pass provider settings to pipeline
+        result = self.pipeline.optimize_with_intent(
+            prompt_id=prompt_id,
+            intent=intent,
+            rounds=rounds,
+            async_mode=async_mode,
+            provider_settings=provider_settings
+        )
+        
+        self._send_json(result)
+        provider = provider_settings.get('provider', 'ollama')
+        logger.info(f"Intent-aware optimization requested for: {prompt_id} (provider: {provider})")
     
     def _handle_optimize(self, data: Dict):
         """Optimize prompt endpoint."""

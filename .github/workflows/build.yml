@@ -1,0 +1,101 @@
+name: Build Extension
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-chrome:
+    name: Build Chrome Extension
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create Chrome ZIP
+        run: |
+          cd extension
+          zip -r ../promptctl-chrome-${{ github.sha }}.zip . \
+            -x "*.git*" \
+            -x "*.md" \
+            -x "generate_icons.py" \
+            -x "create_icons.py"
+
+      - name: Upload Chrome Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: promptctl-chrome
+          path: promptctl-chrome-*.zip
+          retention-days: 30
+
+  build-firefox:
+    name: Build Firefox Extension
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create Firefox manifest
+        run: |
+          cd extension
+          # Create Firefox-compatible manifest (add browser_specific_settings)
+          jq '. + {
+            "browser_specific_settings": {
+              "gecko": {
+                "id": "promptctl@example.com",
+                "strict_min_version": "109.0"
+              }
+            }
+          }' manifest.json > manifest.firefox.json
+          mv manifest.firefox.json manifest.json
+
+      - name: Create Firefox ZIP
+        run: |
+          cd extension
+          zip -r ../promptctl-firefox-${{ github.sha }}.zip . \
+            -x "*.git*" \
+            -x "*.md" \
+            -x "generate_icons.py" \
+            -x "create_icons.py"
+
+      - name: Upload Firefox Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: promptctl-firefox
+          path: promptctl-firefox-*.zip
+          retention-days: 30
+
+  release:
+    name: Create Release
+    needs: [build-chrome, build-firefox]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Chrome artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: promptctl-chrome
+
+      - name: Download Firefox artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: promptctl-firefox
+
+      - name: Rename artifacts for release
+        run: |
+          mv promptctl-chrome-*.zip promptctl-chrome-${{ github.ref_name }}.zip
+          mv promptctl-firefox-*.zip promptctl-firefox-${{ github.ref_name }}.zip
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            promptctl-chrome-*.zip
+            promptctl-firefox-*.zip
+          generate_release_notes: true

@@ -1,388 +1,168 @@
-# promptctl 🎯
+# PromptCtl Quick Capture
 
-A production-quality Git-backed prompt management CLI with comprehensive tagging, batch operations, and automatic conflict resolution.
+**Version:** 1.0.0  
+**Status:** Production Ready
 
-## ✨ Features
+## 1. Abstract
 
-- **Git-backed storage**: Full version control with git history
-- **Tag management**: Add/remove/list/filter with AND/OR logic
-- **Batch mode**: Commit every N saves (5-10x faster for bulk ops)
-- **Auto-commit daemon**: Continuous monitoring with 4 conflict strategies
-- **AI-powered commits** ✨ *NEW*: Optional LLM-generated commit messages via Phi-3.5
-- **Type-safe**: Complete type hints throughout
-- **Production-ready**: Comprehensive error handling and logging
+PromptCtl Quick Capture is a browser extension for capturing, organizing, and optimizing AI prompts. It connects to a local backend server that stores prompts and optionally optimizes them using DSPy.
 
-## 🚀 Quick Start
+## 2. Architecture
+
+```
+┌─────────────────┐     HTTP/JSON      ┌─────────────────┐
+│  Browser Ext.   │ ◄──────────────►   │  promptctl.py   │
+│  (Chrome/FF)    │    localhost:8741  │  FastAPI Server │
+└─────────────────┘                    └────────┬────────┘
+                                                │
+                                       ┌────────▼────────┐
+                                       │   Local Ollama  │
+                                       │   (Optional)    │
+                                       └─────────────────┘
+```
+
+**Components:**
+- `extension/` — Browser extension (Manifest V3)
+- `promptctl.py` — FastAPI backend server
+- `core/` — Backend modules (storage, DSPy optimization)
+
+## 3. User Interface Reference
+
+### 3.1 Capture Tab
+
+![Capture Tab](docs/screenshots/01-capture-tab.png)
+
+**Header:**
+- Application title with connection status indicator (green = connected)
+- Status shows active features: "Connected + Pipeline + DSPy"
+
+**Prompt Text:**
+- Large text area for entering or pasting prompt text
+- Supports selection capture via keyboard shortcut (Ctrl+Shift+S / Cmd+Shift+S)
+
+### 3.2 Capture Form (Intent & Goals)
+
+![Capture Form](docs/screenshots/02-capture-form.png)
+
+**Intent & Goals Section:**
+- **Analyze** button — Auto-detect prompt type and metadata
+- **Type** — Prompt category (auto-detect or manual selection)
+- **Target Audience** — Intended users (developers, students, general)
+- **Desired Outcome** — Expected result from the prompt
+- **Constraints** — Limitations (word count, tone, format)
+
+**Metadata:**
+- **Name** — Optional identifier for the prompt
+- **Tags** — Comma-separated labels for organization
+- **Link to previous prompt** — Chain prompts into conversations
+
+**Options:**
+- **Auto-tag from domain** — Extract tags from current website
+- **Auto-optimize with DSPy** — Enable automatic optimization
+
+**Actions:**
+- **Save** — Store prompt without optimization
+- **Save & Optimize** — Store and queue for DSPy optimization
+
+### 3.3 Prompts Tab
+
+![Prompts Tab](docs/screenshots/03-prompts-tab.png)
+
+**Search:**
+- Filter by content, name, tag, or hash
+- Refresh button to reload from server
+
+**Prompt List:**
+- Each prompt displays UUID and preview text
+- Click to view/edit prompt details
+- Supports multilingual content (Persian, English, etc.)
+
+### 3.4 Jobs Tab
+
+![Jobs Tab](docs/screenshots/04-jobs-tab.png)
+
+**Background Jobs:**
+- Lists active DSPy optimization jobs
+- Refresh button to check job status
+- Shows "No jobs" when queue is empty
+
+### 3.5 Settings Tab
+
+![Settings Header](docs/screenshots/05-settings-header.png)
+![Settings Full](docs/screenshots/06-settings-full.png)
+
+**AI Provider:**
+- **Provider** — Select backend (Local Ollama, OpenAI, etc.)
+- **Ollama URL** — Endpoint for local Ollama instance
+- **Model** — LLM model name (e.g., phi3.5:latest)
+
+**Optimizer:**
+- **Enable DSPy Optimization** — Toggle DSPy pipeline
+- **Optimization Rounds** — Number of optimization iterations
+  - 1 round (fast)
+  - 3 rounds (balanced)
+  - 5 rounds (thorough)
+
+**Actions:**
+- **Save Settings** — Persist configuration
+- **Test Connection** — Verify backend connectivity
+
+## 4. Installation
+
+### 4.1 Backend Server
 
 ```bash
-# Install
-cd ~/dev/promptctl
+git clone https://github.com/OmidZamani/promptctl.git
+cd promptctl
 pip install -r requirements.txt
-
-# Save a prompt
-echo "You are a helpful assistant" | python promptctl.py save \
-  --name my-assistant \
-  --tags ai helper production
-
-# List prompts
-python promptctl.py list
-
-# Filter by tags
-python promptctl.py tag filter --tags ai production --match-all
-
-# Show prompt
-python promptctl.py show my-assistant
+python promptctl.py
 ```
 
-## 📦 Installation
+Server runs on `http://localhost:8741`.
+
+### 4.2 Browser Extension
+
+**Chrome:**
+1. Navigate to `chrome://extensions/`
+2. Enable "Developer mode"
+3. Click "Load unpacked"
+4. Select the `extension/` directory
+
+**Firefox:**
+1. Navigate to `about:debugging#/runtime/this-firefox`
+2. Click "Load Temporary Add-on"
+3. Select `extension/manifest.json`
+
+### 4.3 Docker
 
 ```bash
-cd ~/dev/promptctl
-pip install -r requirements.txt
-
-# Or install in development mode
-pip install -e .
+docker-compose up -d
 ```
 
-### Optional: AI-Powered Commit Messages
+## 5. Configuration
 
-For intelligent commit message generation, install Ollama and Phi-3.5:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PROMPTCTL_HOST` | `0.0.0.0` | Server bind address |
+| `PROMPTCTL_PORT` | `8741` | Server port |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama API endpoint |
 
-```bash
-# Install Ollama
-brew install ollama
+Prompts stored in `~/.promptctl/prompts/` as JSON files.
 
-# Start Ollama service
-brew services start ollama
+## 6. Keyboard Shortcuts
 
-# Download Phi-3.5 model (2.2GB)
-ollama pull phi3.5
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+Shift+S` (Win/Linux) | Save selected text as prompt |
+| `Cmd+Shift+S` (Mac) | Save selected text as prompt |
 
-# Test it works
-ollama run phi3.5 "Hello"
-```
+## 7. Security Considerations
 
-**Benefits:**
-- Smart commit messages: "Refactor API structure in auth module"
-- Understands file context automatically
-- Completely local (no API calls)
-- Optional (graceful fallback to default messages)
+1. **Local-only by default** — Server binds to localhost
+2. **No telemetry** — No data sent to external services
+3. **API tokens** — Store in environment variables, never in code
+4. **Ollama** — Runs locally; no cloud dependency
 
-## 📖 Usage
-
-### Save Prompts
-
-```bash
-# From stdin
-echo "Write a Python function" | python promptctl.py save --name task1 --tags python coding
-
-# From file
-python promptctl.py save --file prompt.txt --name task2 --tags coding
-
-# Inline
-python promptctl.py save -m "Explain quantum physics" --tags science --description "Physics topic"
-
-# With batch mode (commits every 5 saves)
-python promptctl.py save --name p1 --tags test --batch --batch-size 5 -m "Prompt 1"
-```
-
-### Tag Management
-
-```bash
-# Add tags
-python promptctl.py tag add --prompt-id my-prompt --tags production important
-
-# Remove tags
-python promptctl.py tag remove --prompt-id my-prompt --tags draft
-
-# List all tags with counts
-python promptctl.py tag list
-
-# List tags for specific prompt
-python promptctl.py tag list --prompt-id my-prompt
-
-# Filter by tags (OR logic - any match)
-python promptctl.py tag filter --tags python javascript
-
-# Filter with AND logic (must have all)
-python promptctl.py tag filter --tags python production tested --match-all
-```
-
-### List & Show
-
-```bash
-# List all
-python promptctl.py list
-
-# Filter by tags
-python promptctl.py list --tags python --verbose
-
-# Show specific prompt
-python promptctl.py show my-prompt
-```
-
-### Daemon
-
-```bash
-# Start daemon (default: 60s interval, timestamp strategy)
-python promptctl.py daemon
-
-# Custom settings
-python promptctl.py daemon --interval 30 --conflict-strategy ours
-
-# With AI-powered commit messages (requires Ollama + Phi-3.5)
-python promptctl.py daemon --use-llm
-
-# With custom LLM model
-python promptctl.py daemon --use-llm --llm-model phi3.5
-```
-
-**Conflict Strategies:**
-- `timestamp` (default): Keep most recent version
-- `ours`: Always keep local changes
-- `theirs`: Always keep daemon changes  
-- `manual`: Require user intervention
-
-**LLM Features:**
-- `--use-llm`: Enable AI-generated commit messages
-- `--llm-model MODEL`: Specify Ollama model (default: phi3.5)
-- Graceful fallback if LLM unavailable
-- Smart messages based on changed files
-
-### Status & Diff
-
-```bash
-python promptctl.py status --verbose
-python promptctl.py diff
-python promptctl.py diff --staged
-```
-
-## 🏗️ Architecture
-
-### Components
-
-1. **Git Manager** (`core/git_manager.py`)
-   - Uses GitPython for git operations
-   - Handles commits, status, conflicts
-
-2. **Tag Manager** (`core/tag_manager.py`)
-   - Tags stored in `.meta.json` files
-   - Fast lookups via `.tags_index.json`
-   - AND/OR filtering logic
-
-3. **Batch Manager** (`core/batch_manager.py`)
-   - Deferred commits for performance
-   - Counter persists in `.batch_counter`
-
-4. **Daemon** (`core/daemon.py`)
-   - Auto-commits on interval
-   - 4 conflict resolution strategies
-   - Audit log in `.conflict_log.txt`
-   - Optional LLM commit message generation
-
-5. **LLM Generator** (`core/daemon.py::LLMCommitGenerator`)
-   - Uses Ollama + Phi-3.5 for smart commits
-   - Graceful fallback to default messages
-   - Completely local (no API calls)
-
-### GitPython vs libgit2 Trade-offs
-
-| Aspect | GitPython ✅ | libgit2 |
-|--------|--------------|---------|
-| Installation | Simple pip install | Needs C library |
-| API | High-level, Pythonic | Low-level |
-| Performance | Good for small files | Faster |
-| Debugging | Easy (see git commands) | Harder |
-
-**Decision**: GitPython for ease of use and maintainability.
-
-See [DESIGN.md](DESIGN.md) for detailed analysis.
-
-## 📂 File Structure
-
-```
-~/.promptctl/
-├── .git/                    # Git repository
-├── prompts/                 # Prompt storage
-│   ├── my-prompt.txt        # Prompt content
-│   ├── my-prompt.meta.json  # Metadata (tags, etc.)
-│   └── ...
-├── .tags_index.json         # Tag lookup index
-├── .batch_counter           # Batch mode counter
-├── .conflict_log.txt        # Conflict resolution log
-└── README.md
-```
-
-## 🎯 Examples
-
-### Example 1: Building a Prompt Library
-
-```bash
-# Save categorized prompts
-python promptctl.py save --name code-review --tags coding review \
-  -m "Review this code for bugs and best practices"
-
-python promptctl.py save --name write-docs --tags coding docs \
-  -m "Write comprehensive documentation"
-
-# List all coding prompts
-python promptctl.py list --tags coding
-
-# Find review prompts
-python promptctl.py tag filter --tags coding review --match-all
-```
-
-### Example 2: Batch Import
-
-```bash
-# Import 20 prompts with batch mode
-for i in {1..20}; do
-  python promptctl.py save \
-    --name "prompt-$i" \
-    --tags test \
-    --batch \
-    --batch-size 10 \
-    -m "Test prompt $i"
-done
-```
-
-### Example 3: Running the Daemon
-
-```bash
-# Terminal 1: Start daemon
-python promptctl.py daemon --interval 30 --conflict-strategy timestamp
-
-# Terminal 2: Make changes (daemon auto-commits)
-echo "New prompt" | python promptctl.py save --name test --tags demo
-```
-
-### Example 4: AI-Powered Commit Messages
-
-```bash
-# Start daemon with LLM (requires Ollama + Phi-3.5)
-python promptctl.py daemon --use-llm --interval 20
-
-# Edit files - daemon generates smart commits
-echo "## New feature" >> ~/.promptctl/prompts/myfile.md
-
-# Check the commit message:
-cd ~/.promptctl && git log --oneline -1
-# Output: "Refactor API structure in auth module"  ← AI-generated!
-
-# Compare to default:
-# Output: "Auto-commit: 2025-12-30 16:46:24"     ← Without LLM
-```
-
-## 🧪 Testing
-
-```bash
-# Run tests (requires pytest)
-pip install pytest
-python -m pytest tests/ -v
-
-# Run examples
-cd examples
-./basic_usage.sh
-./batch_mode.sh
-
-# Quick demo
-make demo
-```
-
-## ⚙️ Configuration
-
-Default repository: `~/.promptctl`
-
-Override with `--repo`:
-```bash
-python promptctl.py --repo /path/to/repo save --name test -m "Test"
-```
-
-## 🔄 Merge Conflict Handling
-
-When local edits clash with daemon auto-commits:
-
-**TIMESTAMP** (default): Keep most recently modified
-- ✅ Automatic, usually correct
-- Use for: Development
-
-**OURS**: Always keep local changes
-- ✅ Never lose manual edits
-- Use for: High-value manual work
-
-**THEIRS**: Always keep daemon changes
-- ✅ Consistent daemon state
-- Use for: Daemon is authoritative
-
-**MANUAL**: Require user intervention
-- ✅ Full control, no data loss
-- Use for: Critical data
-
-All resolutions logged to `.conflict_log.txt`.
-
-## 🚦 Performance
-
-| Operation | Without Batch | With Batch (5x) |
-|-----------|---------------|-----------------|
-| Save prompt | 50ms | 10ms |
-| Add tags | 45ms | 8ms |
-| List | 5ms | 5ms |
-| Filter | 3ms | 3ms |
-
-**Scalability**: Handles 10,000+ prompts efficiently.
-
-## 🔮 Future Enhancements
-
-1. **Remote sync**: `push`/`pull` commands
-2. **Search**: Full-text search across content
-3. **Templates**: Variable substitution
-4. **History**: View/restore prompt versions
-5. **Export**: JSON, CSV, Markdown formats
-6. **Import**: From other tools
-7. **Aliases**: Quick access to frequent prompts
-8. **TUI**: Interactive browser
-9. **Encryption**: Sensitive prompt protection
-10. **Webhooks**: Action triggers
-
-## 📝 Design Documentation
-
-See [DESIGN.md](DESIGN.md) for:
-- Detailed architecture decisions
-- Trade-off analysis
-- Performance characteristics
-- Security considerations
-- Testing strategy
-
-## 🤝 Contributing
-
-Contributions welcome!
-
-**Code style**:
-- Type hints required
-- Docstrings for public methods
-- Max line length: 100 chars
-
-**Testing**:
-- Unit tests for new features
-- Update integration tests
-- Manual testing with examples
-
-## 📄 License
+## 8. License
 
 MIT License
-
-## 🎓 Learning Resources
-
-This project demonstrates:
-- ✅ Production-quality Python code
-- ✅ Complete type hints and docstrings
-- ✅ Comprehensive error handling
-- ✅ Design documentation and trade-off analysis
-- ✅ Usage examples and testing
-- ✅ Clean architecture with separation of concerns
-
-Perfect for learning CLI development, git integration, and software design principles!
-
----
-
-Built with ❤️ for managing AI prompts efficiently.
